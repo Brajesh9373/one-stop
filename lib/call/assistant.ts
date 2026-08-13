@@ -14,7 +14,7 @@ export function buildLectureCallAssistant(context: LectureContext, publicAppUrl:
     server: {
       url: `${publicAppUrl}/api/call/vapi`,
     },
-    serverMessages: ['assistant-request', 'tool-calls', 'status-update', 'end-of-call-report'],
+    serverMessages: ['tool-calls', 'status-update', 'end-of-call-report'],
     model: {
       provider: 'openai',
       model: 'gpt-4o-mini',

@@ -18,9 +18,14 @@ export function getPublicAppUrl() {
   return requireEnv('PUBLIC_APP_URL')
 }
 
+export function getOptionalPublicAppUrl() {
+  return readEnv('PUBLIC_APP_URL')
+}
+
 export function getVapiConfig() {
   return {
     apiKey: requireEnv('VAPI_API_KEY'),
+    publicKey: readEnv('VAPI_PUBLIC_KEY'),
     baseUrl: readEnv('VAPI_BASE_URL') ?? 'https://api.vapi.ai',
     phoneNumberId: requireEnv('VAPI_PHONE_NUMBER_ID'),
   }
@@ -28,7 +33,9 @@ export function getVapiConfig() {
 
 export function getTwilioConfig() {
   return {
+    accountSid: readEnv('TWILIO_ACCOUNT_SID'),
     authToken: readEnv('TWILIO_AUTH_TOKEN'),
+    phoneNumber: readEnv('TWILIO_PHONE_NUMBER'),
   }
 }
 
@@ -53,5 +60,24 @@ export function getDefaultLectureContext(): LectureContext {
     lectureId: readEnv('LECTURE_ID') ?? 'cs-301-lecture-08',
     lectureTitle: readEnv('LECTURE_TITLE') ?? 'Trees, Graphs & Traversals',
     lectureSequence: Number(readEnv('LECTURE_SEQUENCE') ?? '8'),
+  }
+}
+
+export function getCallIntegrationReadiness() {
+  const missing: string[] = []
+
+  if (!readEnv('PUBLIC_APP_URL')) missing.push('PUBLIC_APP_URL')
+  if (!readEnv('VAPI_API_KEY')) missing.push('VAPI_API_KEY')
+  if (!readEnv('VAPI_PHONE_NUMBER_ID')) missing.push('VAPI_PHONE_NUMBER_ID')
+  if (!readEnv('SARVAM_API_KEY')) missing.push('SARVAM_API_KEY')
+
+  return {
+    ready: missing.length === 0,
+    missing,
+    configured: {
+      vapiPublicKey: Boolean(readEnv('VAPI_PUBLIC_KEY')),
+      twilioAccountSid: Boolean(readEnv('TWILIO_ACCOUNT_SID')),
+      twilioPhoneNumber: Boolean(readEnv('TWILIO_PHONE_NUMBER')),
+    },
   }
 }

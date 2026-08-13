@@ -32,6 +32,21 @@ function extractPcmFromWave(waveBuffer: Buffer) {
   throw new Error('Sarvam WAV response did not contain a data chunk.')
 }
 
+function isLikelySilentPcm(pcmBuffer: Buffer) {
+  if (pcmBuffer.length < 2) return true
+
+  let nonZeroSamples = 0
+  let peakAmplitude = 0
+
+  for (let offset = 0; offset + 1 < pcmBuffer.length; offset += 2) {
+    const sample = Math.abs(pcmBuffer.readInt16LE(offset))
+    if (sample > 0) nonZeroSamples += 1
+    if (sample > peakAmplitude) peakAmplitude = sample
+  }
+
+  return nonZeroSamples === 0 || peakAmplitude < 8
+}
+
 export async function POST(request: Request) {
   const body = (await request.json()) as VoiceRequestBody
   const text = body.message?.text?.trim()
@@ -76,6 +91,9 @@ export async function POST(request: Request) {
     }
 
     const pcmAudio = extractPcmFromWave(Buffer.from(encodedAudio, 'base64'))
+    if (isLikelySilentPcm(pcmAudio)) {
+      throw new Error('Sarvam TTS returned silent PCM audio.')
+    }
 
     return new Response(pcmAudio, {
       status: 200,
