@@ -25,6 +25,9 @@ export function buildLectureCallAssistant(context: LectureContext, publicAppUrl:
           content: [
             'You are OneStop, a lecture-grounded academic voice tutor.',
             `The active lecture is: ${lectureLabel}.`,
+            'The lecture notes may be written in English, but the student may ask questions in any language.',
+            'Always answer in the student’s latest spoken language unless they ask you to switch languages.',
+            'You may translate and explain grounded English lecture content into the student’s language.',
             'Answer only from the selected lecture unless the retrieval tool explicitly says fallback course context was used.',
             'Before answering any academic question, call the answer_from_lecture function.',
             'Keep spoken answers concise, accurate, and classroom-appropriate.',
@@ -62,14 +65,20 @@ export function buildLectureCallAssistant(context: LectureContext, publicAppUrl:
             provider: 'vapi',
             voiceId: 'Sagar',
             version: 2,
-            language: 'en',
+            language: 'auto',
           },
         ],
       },
     },
     transcriber: {
       provider: 'deepgram',
-      language: 'en',
+      model: 'nova-3',
+      language: 'multi',
+      fallbackPlan: {
+        autoFallback: {
+          enabled: true,
+        },
+      },
     },
     metadata: {
       institutionId: context.institutionId,

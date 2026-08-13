@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { getSarvamConfig } from '@/lib/call/config'
+import { detectSarvamLanguageConfig } from '@/lib/call/language'
 
 type VoiceRequestBody = {
   message?: {
@@ -61,6 +62,12 @@ export async function POST(request: Request) {
 
   try {
     const sarvam = getSarvamConfig()
+    const detectedLanguage = detectSarvamLanguageConfig(text)
+
+    if (!detectedLanguage) {
+      throw new Error('Sarvam fallback requested for a language outside its supported set.')
+    }
+
     const response = await fetch(`${sarvam.baseUrl}/text-to-speech`, {
       method: 'POST',
       headers: {
@@ -69,8 +76,8 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         text,
-        language_code: sarvam.languageCode,
-        speaker: sarvam.speaker,
+        language_code: detectedLanguage.languageCode,
+        speaker: detectedLanguage.speaker,
         speech_sample_rate: sampleRate,
         model: sarvam.model,
         output_audio_codec: 'wav',
