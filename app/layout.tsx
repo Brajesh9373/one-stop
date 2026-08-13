@@ -1,10 +1,5 @@
 import { Analytics } from '@vercel/analytics/next'
-import { DM_Mono, DM_Sans, Space_Grotesk } from 'next/font/google'
 import type { Metadata, Viewport } from 'next'
-
-const dmSans = DM_Sans({ subsets: ['latin'], variable: '--font-dm-sans' })
-const dmMono = DM_Mono({ subsets: ['latin'], weight: ['400'], variable: '--font-dm-mono' })
-const spaceGrotesk = Space_Grotesk({ subsets: ['latin'], variable: '--font-space-grotesk' })
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -42,7 +37,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="bg-background">
-      <body className={`${dmSans.variable} ${dmMono.variable} ${spaceGrotesk.variable} antialiased`}>
+      <body className="antialiased">
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>

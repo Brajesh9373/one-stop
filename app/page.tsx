@@ -35,6 +35,8 @@ import {
   Zap,
 } from 'lucide-react'
 
+import type { LectureContext, RagResult } from '@/lib/rag/types'
+
 type Role = 'student' | 'faculty'
 type View = 'dashboard' | 'classroom' | 'ai-chat' | 'ai-call' | 'ai-classroom' | 'resources' | 'analytics' | 'profile'
 
@@ -55,6 +57,16 @@ const facultyAgents = [
   { name: 'Student Pulse', status: 'Prepared a concept-gap brief', time: '18 min ago', icon: Users },
   { name: 'Resource Scout', status: 'Found 4 aligned readings', time: '34 min ago', icon: Library },
 ]
+
+const selectedLectureContext: LectureContext = {
+  institutionId: 'onestop-demo',
+  facultyId: 'faculty-nk',
+  courseId: 'cs-301',
+  courseName: 'Data Structures & Algorithms',
+  lectureId: 'cs-301-lecture-08',
+  lectureTitle: 'Trees, Graphs & Traversals',
+  lectureSequence: 8,
+}
 
 const navFor = (role: Role) => role === 'student'
   ? [
@@ -112,8 +124,52 @@ function Classroom({ role, onNavigate }: { role: Role; onNavigate: (view: View) 
 
 function AIChat() {
   const [prompt, setPrompt] = useState('')
-  const [sent, setSent] = useState(false)
-  return <div className="chat-view animate-in"><div className="mx-auto max-w-3xl"><p className="eyebrow">Academic chat · Grounded in CS 301</p><h1 className="mt-2 font-display text-3xl font-semibold tracking-[-0.055em]">What are you curious about?</h1><p className="mt-2 text-sm text-muted-foreground">Ask anything about your courses. OneStop will show its sources and explain the reasoning.</p><div className="chat-window mt-8"><div className="chat-source"><span className="source-dot" /><span>Context active</span><span className="source-separator">·</span><span>CS 301 / Lecture 08</span><button className="ml-auto"><Settings2 size={14} /></button></div><div className="chat-messages">{sent ? <><div className="message user-message">Explain the difference between a balanced tree and a complete tree.</div><div className="message assistant-message"><div className="assistant-avatar"><Sparkles size={14} /></div><div><p>A <strong>complete tree</strong> is filled level by level from left to right. A <strong>balanced tree</strong> focuses on keeping the height of the left and right subtrees roughly equal.</p><p className="mt-3">Think of completeness as a rule about <em>where nodes go</em>, while balance is a rule about <em>how tall the branches become</em>.</p><div className="answer-source"><FileText size={13} /><span>Lecture transcript · 42:18</span></div></div></div></> : <div className="chat-empty"><div className="empty-orb"><Sparkles size={22} /></div><p className="mt-4 font-display text-lg font-semibold tracking-[-0.03em]">Your academic copilot is ready.</p><p className="mt-2 max-w-sm text-center text-xs leading-5 text-muted-foreground">Try one of these prompts to start a focused conversation.</p><div className="mt-5 flex flex-wrap justify-center gap-2"><button onClick={() => setPrompt('Explain this lecture like I am five')} className="prompt-chip">Explain this simply</button><button onClick={() => setPrompt('What should I review before the exam?')} className="prompt-chip">What should I review?</button><button onClick={() => setPrompt('Give me a practice problem')} className="prompt-chip">Give me a practice problem</button></div></div>}</div><div className="chat-composer"><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ask a question about your course..." aria-label="Ask OneStop a question" /><div className="flex items-center justify-between"><span className="text-[11px] text-muted-foreground">OneStop can make mistakes. Check important work.</span><button className="send-button" disabled={!prompt.trim()} onClick={() => setSent(true)}><ArrowUpRight size={16} /></button></div></div></div></div></div>
+  const [submittedPrompt, setSubmittedPrompt] = useState('')
+  const [result, setResult] = useState<RagResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  async function handleSubmit() {
+    const trimmedPrompt = prompt.trim()
+    if (!trimmedPrompt) return
+
+    setLoading(true)
+    setError(null)
+    setSubmittedPrompt(trimmedPrompt)
+
+    try {
+      const response = await fetch('/api/rag/query', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mode: 'chat',
+          studentId: 'student-brajesh',
+          prompt: trimmedPrompt,
+          context: selectedLectureContext,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Unable to reach the lecture-grounded RAG service.')
+      }
+
+      const payload = (await response.json()) as RagResult
+      setResult(payload)
+    } catch (submissionError) {
+      setError(
+        submissionError instanceof Error
+          ? submissionError.message
+          : 'Something went wrong while querying the lecture context.'
+      )
+      setResult(null)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return <div className="chat-view animate-in"><div className="mx-auto max-w-3xl"><p className="eyebrow">Academic chat · Grounded in CS 301</p><h1 className="mt-2 font-display text-3xl font-semibold tracking-[-0.055em]">What are you curious about?</h1><p className="mt-2 text-sm text-muted-foreground">Ask anything about your courses. OneStop will show its sources and explain the reasoning.</p><div className="chat-window mt-8"><div className="chat-source"><span className="source-dot" /><span>Context active</span><span className="source-separator">·</span><span>CS 301 / Lecture 08</span><button className="ml-auto"><Settings2 size={14} /></button></div><div className="chat-messages">{result || error || loading ? <>{submittedPrompt && <div className="message user-message">{submittedPrompt}</div>}{loading && <div className="message assistant-message"><div className="assistant-avatar"><Sparkles size={14} /></div><div><p>Searching the selected lecture first, then checking course fallback only if needed.</p></div></div>}{error && <div className="message assistant-message"><div className="assistant-avatar"><Sparkles size={14} /></div><div><p>{error}</p></div></div>}{result && <div className="message assistant-message"><div className="assistant-avatar"><Sparkles size={14} /></div><div><p>{result.answer}</p>{result.fallbackUsed && <p className="mt-3 text-xs text-muted-foreground">No strong match was found inside Lecture 08, so OneStop expanded retrieval to the broader course context.</p>}<div className="mt-4 flex flex-col gap-2">{result.citations.map((citation) => <div key={citation.chunkId} className="answer-source"><FileText size={13} /><span>{citation.sourceName} · {citation.section}{citation.page ? ` · p.${citation.page}` : citation.timestamp ? ` · ${citation.timestamp}` : ''}</span></div>)}</div></div></div>}</> : <div className="chat-empty"><div className="empty-orb"><Sparkles size={22} /></div><p className="mt-4 font-display text-lg font-semibold tracking-[-0.03em]">Your academic copilot is ready.</p><p className="mt-2 max-w-sm text-center text-xs leading-5 text-muted-foreground">Try one of these prompts to start a focused conversation.</p><div className="mt-5 flex flex-wrap justify-center gap-2"><button onClick={() => setPrompt('Explain the difference between a balanced tree and a complete tree.')} className="prompt-chip">Balanced vs complete tree</button><button onClick={() => setPrompt('Why does balance matter for search performance?')} className="prompt-chip">Why balance matters</button><button onClick={() => setPrompt('How does inorder traversal behave in a BST?')} className="prompt-chip">Inorder traversal</button></div></div>}</div><div className="chat-composer"><textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Ask a question about your course..." aria-label="Ask OneStop a question" /><div className="flex items-center justify-between"><span className="text-[11px] text-muted-foreground">OneStop can make mistakes. Check important work.</span><button className="send-button" disabled={!prompt.trim() || loading} onClick={() => void handleSubmit()}><ArrowUpRight size={16} /></button></div></div></div></div></div>
 }
 
 function AICall() {
