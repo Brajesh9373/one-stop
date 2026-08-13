@@ -1,4 +1,6 @@
 import type {
+  CallRequest,
+  CallTurn,
   FacultySourceDocument,
   LectureContext,
   RagQuery,
@@ -30,6 +32,18 @@ function isLectureContext(value: unknown): value is LectureContext {
     isNonEmptyString(context.lectureId) &&
     isNonEmptyString(context.lectureTitle) &&
     typeof context.lectureSequence === 'number'
+  )
+}
+
+function isCallTurn(value: unknown): value is CallTurn {
+  if (!value || typeof value !== 'object') return false
+  const turn = value as Partial<CallTurn>
+
+  return (
+    isNonEmptyString(turn.id) &&
+    (turn.speaker === 'student' || turn.speaker === 'assistant') &&
+    isNonEmptyString(turn.text) &&
+    isNonEmptyString(turn.createdAt)
   )
 }
 
@@ -73,6 +87,40 @@ export function parseRagQuery(value: unknown): RagQuery | null {
     studentId: payload.studentId.trim(),
     prompt: payload.prompt.trim(),
     context: payload.context,
+  }
+}
+
+export function parseCallRequest(value: unknown): CallRequest | null {
+  if (!value || typeof value !== 'object') return null
+  const payload = value as Partial<CallRequest>
+
+  if (
+    !isNonEmptyString(payload.studentId) ||
+    !isNonEmptyString(payload.prompt) ||
+    !isLectureContext(payload.context)
+  ) {
+    return null
+  }
+
+  if (payload.turns && (!Array.isArray(payload.turns) || payload.turns.some((turn) => !isCallTurn(turn)))) {
+    return null
+  }
+
+  if (payload.sessionId && !isNonEmptyString(payload.sessionId)) {
+    return null
+  }
+
+  return {
+    studentId: payload.studentId.trim(),
+    prompt: payload.prompt.trim(),
+    context: payload.context,
+    sessionId: payload.sessionId?.trim(),
+    turns: payload.turns?.map((turn) => ({
+      id: turn.id,
+      speaker: turn.speaker,
+      text: turn.text.trim(),
+      createdAt: turn.createdAt,
+    })),
   }
 }
 

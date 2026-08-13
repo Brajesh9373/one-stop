@@ -4,6 +4,8 @@ export type StudentMode = 'chat' | 'call' | 'virtual-classroom'
 
 export type RetrievalScope = 'lecture' | 'course'
 
+export type CallSpeaker = 'student' | 'assistant'
+
 export type FacultySourceDocument = {
   id: string
   institutionId: string
@@ -125,4 +127,29 @@ export type RagRetrieveResult = {
   requestId: string
   lectureResults: RetrievedChunk[]
   courseResults: RetrievedChunk[]
+}
+
+export type CallTurn = {
+  id: string
+  speaker: CallSpeaker
+  text: string
+  createdAt: string
+}
+
+export type CallRequest = {
+  studentId: string
+  prompt: string
+  context: LectureContext
+  sessionId?: string
+  turns?: CallTurn[]
+}
+
+export type CallResponse = {
+  sessionId: string
+  turnId: string
+  transcript: string
+  answer: string
+  citations: RagCitation[]
+  fallbackUsed: boolean
+  diagnostics: RagDiagnostics
 }
