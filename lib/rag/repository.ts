@@ -38,7 +38,11 @@ export interface RagRepository {
   ingest(documents: FacultySourceDocument[]): Promise<void>
 }
 
-let repositorySingleton: RagRepository | undefined
+type InitializableRagRepository = RagRepository & {
+  init(): Promise<void>
+}
+
+let repositorySingleton: InitializableRagRepository | undefined
 let initPromise: Promise<void> | undefined
 let mutationQueue = Promise.resolve()
 

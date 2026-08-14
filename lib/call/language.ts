@@ -59,6 +59,18 @@ function containsAny(text: string, hints: string[]) {
 export function detectSarvamLanguageConfig(text: string): SarvamLanguageConfig | null {
   const normalized = text.trim()
   if (!normalized) return null
+  const lower = normalized.toLowerCase()
+
+  if (lower.includes('marathi') || lower.includes('मराठी')) return SUPPORTED_CONFIGS['mr-IN']
+  if (lower.includes('hindi') || lower.includes('हिंदी')) return SUPPORTED_CONFIGS['hi-IN']
+  if (lower.includes('bengali') || lower.includes('bangla')) return SUPPORTED_CONFIGS['bn-IN']
+  if (lower.includes('tamil')) return SUPPORTED_CONFIGS['ta-IN']
+  if (lower.includes('telugu')) return SUPPORTED_CONFIGS['te-IN']
+  if (lower.includes('kannada')) return SUPPORTED_CONFIGS['kn-IN']
+  if (lower.includes('malayalam')) return SUPPORTED_CONFIGS['ml-IN']
+  if (lower.includes('gujarati')) return SUPPORTED_CONFIGS['gu-IN']
+  if (lower.includes('punjabi')) return SUPPORTED_CONFIGS['pa-IN']
+  if (lower.includes('odia') || lower.includes('oriya')) return SUPPORTED_CONFIGS['od-IN']
 
   if (TAMIL_RANGE.test(normalized)) return SUPPORTED_CONFIGS['ta-IN']
   if (TELUGU_RANGE.test(normalized)) return SUPPORTED_CONFIGS['te-IN']

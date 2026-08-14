@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { getDefaultLectureContext, getTwilioConfig } from '@/lib/call/config'
-import { verifyTwilioSignature } from '@/lib/call/twilio'
-import { createTwilioBypassCall } from '@/lib/call/vapi'
+import { buildLecturePromptTwiml, verifyTwilioSignature } from '@/lib/call/twilio'
 
 function buildRequestUrl(request: Request) {
   return request.url
@@ -36,12 +35,11 @@ export async function POST(request: Request) {
 
   try {
     const context = getDefaultLectureContext()
-    const call = await createTwilioBypassCall(caller, context)
-    const twiml = call.phoneCallProviderDetails?.twiml
-
-    if (!twiml || typeof twiml !== 'string') {
-      throw new Error('Vapi did not return TwiML for the inbound Twilio call.')
-    }
+    const twiml = buildLecturePromptTwiml({
+      context,
+      prompt: `Hello, this is OneStop. We are in ${context.courseName}, lecture ${context.lectureSequence}, ${context.lectureTitle}. Ask a question from this lecture.`,
+      languageCode: 'en-IN',
+    })
 
     return new Response(twiml, {
       status: 200,

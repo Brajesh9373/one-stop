@@ -197,6 +197,39 @@ function strongIntentMatch(profile: QueryProfile, unit: SentenceUnit) {
   return false
 }
 
+function normalizedSentence(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function tokenOverlap(left: string, right: string) {
+  const leftTokens = new Set(tokenize(left))
+  const rightTokens = new Set(tokenize(right))
+  if (leftTokens.size === 0 || rightTokens.size === 0) return 0
+
+  let shared = 0
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) shared += 1
+  }
+
+  return shared / Math.min(leftTokens.size, rightTokens.size)
+}
+
+function hasDuplicateEvidence(candidate: ScoredUnit, selected: ScoredUnit[]) {
+  const candidateText = normalizedSentence(candidate.unit.content)
+  return selected.some((entry) => {
+    const selectedText = normalizedSentence(entry.unit.content)
+    return (
+      selectedText.includes(candidateText) ||
+      candidateText.includes(selectedText) ||
+      tokenOverlap(candidate.unit.content, entry.unit.content) >= 0.72
+    )
+  })
+}
+
 function hardRelevanceFilter(profile: QueryProfile, unit: SentenceUnit, lexicalScore: number, metadataScore: number) {
   if (strongIntentMatch(profile, unit)) return true
 
@@ -329,9 +362,12 @@ function synthesizeAnswer(profile: QueryProfile, units: ScoredUnit[], fallbackUs
     }
   }
 
-  const ordered = units
-    .filter((entry) => strongIntentMatch(profile, entry.unit) || entry.lexicalScore >= 0.2)
-    .slice(0, hybridLectureRagConfig.maxAnswerSentences)
+  const ordered: ScoredUnit[] = []
+  for (const entry of units.filter((unit) => strongIntentMatch(profile, unit.unit) || unit.lexicalScore >= 0.2)) {
+    if (hasDuplicateEvidence(entry, ordered)) continue
+    ordered.push(entry)
+    if (ordered.length >= hybridLectureRagConfig.maxAnswerSentences) break
+  }
 
   if (ordered.length === 0) {
     return {

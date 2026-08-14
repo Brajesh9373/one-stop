@@ -1,12 +1,28 @@
 import { NextResponse } from 'next/server'
 
-import { createOutboundLectureCall } from '@/lib/call/vapi'
 import { getDefaultLectureContext } from '@/lib/call/config'
-import { isValidE164PhoneNumber } from '@/lib/call/twilio'
+import { createTwilioOutboundLectureCall, isValidE164PhoneNumber } from '@/lib/call/twilio'
+import type { LectureContext } from '@/lib/rag/types'
 
 type OutboundCallRequest = {
   phoneNumber?: string
   studentName?: string
+  context?: Partial<LectureContext>
+}
+
+function readLectureContext(value: OutboundCallRequest['context']) {
+  const fallback = getDefaultLectureContext()
+  if (!value || typeof value !== 'object') return fallback
+
+  return {
+    institutionId: typeof value.institutionId === 'string' ? value.institutionId : fallback.institutionId,
+    facultyId: typeof value.facultyId === 'string' ? value.facultyId : fallback.facultyId,
+    courseId: typeof value.courseId === 'string' ? value.courseId : fallback.courseId,
+    courseName: typeof value.courseName === 'string' ? value.courseName : fallback.courseName,
+    lectureId: typeof value.lectureId === 'string' ? value.lectureId : fallback.lectureId,
+    lectureTitle: typeof value.lectureTitle === 'string' ? value.lectureTitle : fallback.lectureTitle,
+    lectureSequence: typeof value.lectureSequence === 'number' ? value.lectureSequence : fallback.lectureSequence,
+  } satisfies LectureContext
 }
 
 export async function POST(request: Request) {
@@ -21,8 +37,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const context = getDefaultLectureContext()
-    const call = await createOutboundLectureCall(
+    const context = readLectureContext(body.context)
+    const call = await createTwilioOutboundLectureCall(
       {
         number: phoneNumber,
         name: body.studentName?.trim(),
@@ -32,8 +48,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      callId: call.id ?? null,
+      callId: call.sid ?? null,
       status: call.status ?? 'queued',
+      provider: 'twilio-sarvam',
       lectureId: context.lectureId,
       lectureTitle: context.lectureTitle,
     })

@@ -9,8 +9,9 @@ export function GET() {
   return NextResponse.json({
     status: readiness.ready ? 'ok' : 'degraded',
     provider: {
-      telephony: 'vapi + twilio',
-      voice: 'sarvam via vapi custom-voice',
+      telephony: 'twilio programmable voice',
+      speech: 'sarvam sdk speech-to-text + text-to-speech',
+      orchestration: 'one-stop lecture RAG',
     },
     readiness,
     lecture: {

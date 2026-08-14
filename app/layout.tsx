@@ -1,6 +1,11 @@
 import { Analytics } from '@vercel/analytics/next'
+import { IBM_Plex_Mono, Manrope, Sora } from 'next/font/google'
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+
+const manrope = Manrope({ subsets: ['latin'], variable: '--font-manrope' })
+const sora = Sora({ subsets: ['latin'], variable: '--font-sora' })
+const plexMono = IBM_Plex_Mono({ subsets: ['latin'], weight: ['400', '500', '600'], variable: '--font-plex-mono' })
 
 export const metadata: Metadata = {
   title: 'OneStop — The Agentic AI Classroom, Everywhere.',
@@ -26,8 +31,8 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  colorScheme: 'light dark',
-  themeColor: [{ media: '(prefers-color-scheme: dark)', color: '#171923' }],
+  colorScheme: 'light',
+  themeColor: '#f6f8fc',
 }
 
 export default function RootLayout({
@@ -36,10 +41,10 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" className="bg-background">
+    <html lang="en" className={`${manrope.variable} ${sora.variable} ${plexMono.variable} bg-background`}>
       <body className="antialiased">
         {children}
-        {process.env.NODE_ENV === 'production' && <Analytics />}
+        {process.env.VERCEL === '1' && <Analytics />}
       </body>
     </html>
   )
