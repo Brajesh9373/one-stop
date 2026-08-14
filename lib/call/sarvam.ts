@@ -136,7 +136,7 @@ export async function transcribeSpeechWithSarvam(input: TranscribeInput) {
         contentLength: input.audio.length,
       },
       model: asSttModel(config.sttModel),
-      language_code: asSttLanguage(input.languageCode ?? 'unknown'),
+      language_code: asSttLanguage(input.languageCode ?? config.languageCode),
       with_timestamps: false,
     })
 

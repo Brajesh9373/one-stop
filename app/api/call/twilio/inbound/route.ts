@@ -8,7 +8,12 @@ function buildRequestUrl(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const formData = await request.formData()
+  let formData: FormData
+  try {
+    formData = await request.formData()
+  } catch {
+    return new Response('Form data is required.', { status: 400 })
+  }
   const params = Object.fromEntries(
     Array.from(formData.entries()).map(([key, value]) => [key, String(value)])
   )

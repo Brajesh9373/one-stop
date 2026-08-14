@@ -160,6 +160,19 @@ export type UpdateSubjectInput = Partial<CreateSubjectInput> & {
   status?: AcademicStatus
 }
 
+export type CreateModuleInput = {
+  subjectId: string
+  title: string
+}
+
+export type CreateDoubtInput = {
+  subjectId: string
+  lectureId: string
+  studentId: string
+  question: string
+  aiResponse: string
+}
+
 export type CreateLectureInput = {
   subjectId: string
   moduleId: string

@@ -44,3 +44,13 @@ export async function PATCH(request: Request) {
     )
   }
 }
+
+export async function DELETE(request: Request) {
+  const body = (await request.json()) as { id?: unknown }
+  if (typeof body.id !== 'string' || !body.id.trim()) {
+    return NextResponse.json({ error: 'Subject id is required.' }, { status: 400 })
+  }
+
+  const result = await getAcademicRepository().deleteSubject(body.id.trim())
+  return NextResponse.json(result)
+}

@@ -9,7 +9,8 @@ import type {
   AcademicWorkspace,
   AssignmentInput,
   ConnectorSource,
-  CreateLectureInput,
+  CreateModuleInput,
+  CreateDoubtInput,
   CreateSubjectInput,
   CreateUserInput,
   EndSessionInput,
@@ -634,6 +635,16 @@ class AcademicRepository {
     })
   }
 
+  async deleteSubject(subjectId: string) {
+    return this.runMutation(async () => {
+      this.db.prepare('DELETE FROM subject_enrollments WHERE subject_id = ?').run(subjectId)
+      this.db.prepare('DELETE FROM lectures WHERE subject_id = ?').run(subjectId)
+      this.db.prepare('DELETE FROM modules WHERE subject_id = ?').run(subjectId)
+      this.db.prepare('DELETE FROM subjects WHERE id = ?').run(subjectId)
+      return { deleted: true }
+    })
+  }
+
   async assign(input: AssignmentInput) {
     return this.runMutation(async () => {
       if (input.kind === 'teacher') {
@@ -796,6 +807,35 @@ class AcademicRepository {
       this.db.prepare("UPDATE lecture_sessions SET status = 'ended', ended_at = ? WHERE id = ?").run(now(), input.sessionId)
       this.db.prepare("UPDATE lectures SET status = 'completed', updated_at = ? WHERE id = ?").run(now(), session.lectureId)
       return this.listSessions().find((entry) => entry.id === input.sessionId)!
+    })
+  }
+
+  async createModule(input: CreateModuleInput) {
+    return this.runMutation(async () => {
+      const subject = this.listSubjects().find((entry) => entry.id === input.subjectId)
+      if (!subject) throw new Error('Subject not found.')
+
+      const sequenceRow = this.db
+        .prepare('SELECT COALESCE(MAX(sequence), 0) + 1 AS next_sequence FROM modules WHERE subject_id = ?')
+        .get(input.subjectId) as { next_sequence: number }
+      
+      const id = `${input.subjectId}-module-${String(sequenceRow.next_sequence).padStart(2, '0')}`
+      const timestamp = now()
+      
+      this.db
+        .prepare(
+          'INSERT INTO modules (id, subject_id, title, sequence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+        )
+        .run(id, input.subjectId, input.title, Number(sequenceRow.next_sequence), timestamp, timestamp)
+
+      return this.listModules().find((moduleUnit) => moduleUnit.id === id)!
+    })
+  }
+
+  async createDoubt(input: CreateDoubtInput) {
+    return this.runMutation(async () => {
+      this.insertDoubt(input)
+      return { success: true }
     })
   }
 
@@ -1418,6 +1458,18 @@ export function getAcademicRepository() {
     async endSession(input: EndSessionInput) {
       await ensureRepositoryInitialized()
       return repositorySingleton!.endSession(input)
+    },
+    async deleteSubject(subjectId: string) {
+      await ensureRepositoryInitialized()
+      return repositorySingleton!.deleteSubject(subjectId)
+    },
+    async createModule(input: CreateModuleInput) {
+      await ensureRepositoryInitialized()
+      return repositorySingleton!.createModule(input)
+    },
+    async createDoubt(input: CreateDoubtInput) {
+      await ensureRepositoryInitialized()
+      return repositorySingleton!.createDoubt(input)
     },
     async syncConnectorNotes(input: SyncConnectorNotesInput) {
       await ensureRepositoryInitialized()

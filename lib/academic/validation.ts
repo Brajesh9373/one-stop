@@ -13,6 +13,8 @@ import type {
   UpdateLectureInput,
   UpdateSubjectInput,
   UpdateUserInput,
+  CreateModuleInput,
+  CreateDoubtInput,
 } from '@/lib/academic/types'
 
 export function isNonEmptyString(value: unknown): value is string {
@@ -110,6 +112,38 @@ export function parseUpdateSubjectInput(value: unknown): UpdateSubjectInput | nu
     semester: typeof payload.semester === 'number' ? payload.semester : undefined,
     teacherId: isNonEmptyString(payload.teacherId) ? payload.teacherId.trim() : undefined,
     status: payload.status,
+  }
+}
+
+export function parseCreateModuleInput(value: unknown): CreateModuleInput | null {
+  const payload = readObject(value)
+  if (!payload || !isNonEmptyString(payload.subjectId) || !isNonEmptyString(payload.title)) {
+    return null
+  }
+  return {
+    subjectId: payload.subjectId.trim(),
+    title: payload.title.trim(),
+  }
+}
+
+export function parseCreateDoubtInput(value: unknown): CreateDoubtInput | null {
+  const payload = readObject(value)
+  if (
+    !payload ||
+    !isNonEmptyString(payload.subjectId) ||
+    !isNonEmptyString(payload.lectureId) ||
+    !isNonEmptyString(payload.studentId) ||
+    !isNonEmptyString(payload.question) ||
+    !isNonEmptyString(payload.aiResponse)
+  ) {
+    return null
+  }
+  return {
+    subjectId: payload.subjectId.trim(),
+    lectureId: payload.lectureId.trim(),
+    studentId: payload.studentId.trim(),
+    question: payload.question.trim(),
+    aiResponse: payload.aiResponse.trim(),
   }
 }
 

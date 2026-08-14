@@ -7,7 +7,8 @@ import { getRagStoragePaths } from '@/lib/rag/storage'
 import type { RetrievalScope } from '@/lib/rag/types'
 
 const execFileAsync = promisify(execFile)
-const pythonBinary = process.env.RAG_PYTHON_BINARY ?? path.join(process.cwd(), '.venv-rag', 'bin', 'python')
+const isWindows = process.platform === 'win32'
+const pythonBinary = process.env.RAG_PYTHON_BINARY ?? path.join(process.cwd(), '.venv-rag', isWindows ? 'Scripts' : 'bin', isWindows ? 'python.exe' : 'python')
 const scriptPath = path.join(process.cwd(), 'scripts', 'rag_faiss.py')
 
 export type FaissSearchHit = { chunkId: string; score: number }

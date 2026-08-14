@@ -10,7 +10,12 @@ import { runHybridLectureRag } from '@/lib/rag/hybrid'
 
 export async function POST(request: Request) {
   const context = readLectureContextFromSearchParams(new URL(request.url).searchParams)
-  const formData = await request.formData()
+  let formData: FormData
+  try {
+    formData = await request.formData()
+  } catch {
+    return new Response('Form data is required.', { status: 400 })
+  }
   const speechResult = typeof formData.get('SpeechResult') === 'string' ? String(formData.get('SpeechResult')).trim() : ''
   const caller = typeof formData.get('From') === 'string' ? String(formData.get('From')) : 'phone-student'
 

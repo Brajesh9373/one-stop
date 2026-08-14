@@ -31,11 +31,15 @@ function readLectureContext(value: FormDataEntryValue | null): LectureContext {
 }
 
 export async function POST(request: Request) {
-  const formData = await request.formData()
+  let formData: FormData
+  try {
+    formData = await request.formData()
+  } catch {
+    return NextResponse.json({ error: 'Form data is required.' }, { status: 400 })
+  }
   const audio = formData.get('audio')
   const context = readLectureContext(formData.get('context'))
   const studentId = typeof formData.get('studentId') === 'string' ? String(formData.get('studentId')) : 'sarvam-voice-student'
-  const requestedLanguage = typeof formData.get('languageCode') === 'string' ? String(formData.get('languageCode')) : undefined
 
   if (!(audio instanceof File)) {
     return NextResponse.json({ error: 'Audio file is required.' }, { status: 400 })
@@ -43,15 +47,31 @@ export async function POST(request: Request) {
 
   try {
     const audioBuffer = Buffer.from(await audio.arrayBuffer())
+    
+    // Debug amplitude for WAV files (16-bit PCM, skipping 44 byte header)
+    if (audio.name.endsWith('.wav') && audioBuffer.length > 44) {
+      let maxAmp = 0
+      for (let i = 44; i < audioBuffer.length - 1; i += 2) {
+        const sample = Math.abs(audioBuffer.readInt16LE(i))
+        if (sample > maxAmp) maxAmp = sample
+      }
+      console.log(`[DEBUG] Received WAV file size=${audioBuffer.length}, max_amplitude=${maxAmp}`)
+    } else {
+      console.log(`[DEBUG] Received non-WAV file size=${audioBuffer.length}`)
+    }
+
+    const requestedLanguage = typeof formData.get('languageCode') === 'string' ? String(formData.get('languageCode')) : undefined
+    const ext = audio.name.split('.').pop()?.toLowerCase()
+    const contentType = ext === 'wav' ? 'audio/wav' : ext === 'mp4' ? 'audio/mp4' : 'audio/webm'
     const transcription = await transcribeSpeechWithSarvam({
       audio: audioBuffer,
-      filename: audio.name || 'voice-turn.webm',
-      contentType: audio.type || 'audio/webm',
+      filename: audio.name || 'voice-turn.wav',
+      contentType,
       languageCode: requestedLanguage,
     })
 
     if (!transcription.transcript) {
-      return NextResponse.json({ error: 'Sarvam did not return a transcript.' }, { status: 422 })
+      return NextResponse.json({ error: 'No speech detected. Please speak clearly into the microphone.' }, { status: 422 })
     }
 
     const rag = await runHybridLectureRag({

@@ -155,10 +155,13 @@ export async function runHybridLectureRag(query: RagQuery): Promise<RagResult> {
   if (!process.env.RAG_GENERATION_API_KEY) warnings.push('Extractive grounded generation is active.')
   return {
     answer,
-    citations: generated.cited.map(({ unit }) => ({
-      chunkId: unit.chunkId, sourceType: unit.sourceType, sourceName: unit.sourceName, section: unit.section,
-      lectureId: unit.lectureId, lectureTitle: unit.lectureTitle, page: unit.page, timestamp: unit.timestamp,
-    })),
+    citations: Array.from(new Map(generated.cited.map(({ unit }) => [
+      unit.chunkId,
+      {
+        chunkId: unit.chunkId, sourceType: unit.sourceType, sourceName: unit.sourceName, section: unit.section,
+        lectureId: unit.lectureId, lectureTitle: unit.lectureTitle, page: unit.page, timestamp: unit.timestamp,
+      }
+    ])).values()),
     retrievedChunks: generated.cited.map(normalizeRetrievedChunk), fallbackUsed,
     diagnostics: {
       requestId, durationMs: Math.round(performance.now() - startedAt), lectureCandidates: lecture.length,
