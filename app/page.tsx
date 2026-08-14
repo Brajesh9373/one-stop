@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from 'motion/react'
 import Image from 'next/image'
+import { WavRecorder } from '@/lib/call/wav'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
@@ -18,6 +19,7 @@ import {
   GraduationCap,
   Headphones,
   LayoutDashboard,
+  Loader2,
   LogOut,
   Menu,
   MessageSquareText,
@@ -519,12 +521,19 @@ function FacultyAssistantPanel({ workspace }: { workspace: AcademicWorkspace }) 
             : 'Tap to speak'
 
   return (
-    <section className="faculty-voice-panel mt-8">
+    <section className="faculty-voice-panel mt-8 relative opacity-60 pointer-events-none" title="This feature is under development">
+      <div className="absolute inset-0 z-10 flex items-center justify-center">
+        <span className="rounded-full bg-orange-100 px-4 py-2 text-sm font-bold uppercase tracking-wider text-orange-600 shadow-sm border border-orange-200">
+          Feature under development
+        </span>
+      </div>
       <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <div className="faculty-voice-stage">
           <div className="max-w-lg text-center">
             <div>
-              <p className="eyebrow">Faculty AI voice assistant</p>
+              <p className="eyebrow flex items-center justify-center gap-2">
+                Faculty AI voice assistant
+              </p>
               <h2 className="mt-2 font-display text-2xl font-semibold">Command classroom work by voice</h2>
               <p className="mt-3 text-sm leading-6 text-muted-foreground">
                 Tap the orb, speak naturally, and the assistant will execute only subject-scoped classroom actions.
@@ -533,9 +542,9 @@ function FacultyAssistantPanel({ workspace }: { workspace: AcademicWorkspace }) 
             <button
               className={`voice-assistant-orb is-${voiceState}`}
               onClick={voiceState === 'listening' ? stopVoiceCommand : startVoiceCommand}
-              disabled={voiceState === 'processing'}
-              aria-label={voiceState === 'listening' ? 'Stop listening' : 'Start faculty voice assistant'}
-              aria-pressed={voiceState === 'listening'}
+              disabled={true}
+              aria-label="Feature under development"
+              aria-pressed="false"
             >
               <span className="voice-assistant-ring ring-one" />
               <span className="voice-assistant-ring ring-two" />
@@ -643,18 +652,47 @@ function FacultyAssistantPanel({ workspace }: { workspace: AcademicWorkspace }) 
 function AdminPanel({ workspace, reload }: { workspace: AcademicWorkspace; reload: () => Promise<void> }) {
   const teachers = workspace.users.filter((user) => user.role === 'teacher')
   const students = workspace.users.filter((user) => user.role === 'student')
-  const [userForm, setUserForm] = useState({ role: 'student' as AcademicRole, name: '', email: '', year: 3, semester: 5 })
+  const [userForm, setUserForm] = useState({ id: '', role: 'student' as AcademicRole, name: '', email: '', year: 3, semester: 5, isEditing: false })
+  const [subjectForm, setSubjectForm] = useState({ id: '', code: '', name: '', description: '', year: 3, semester: 5, teacherId: teachers[0]?.id ?? '', isEditing: false })
   const [assignmentSubjectId, setAssignmentSubjectId] = useState(workspace.subjects[0]?.id ?? '')
   const [message, setMessage] = useState<string | null>(null)
 
-  async function createUser() {
+  async function saveUser() {
     await apiJson('/api/academic/users', {
-      method: 'POST',
+      method: userForm.isEditing ? 'PATCH' : 'POST',
       body: JSON.stringify(userForm),
     })
-    setUserForm({ role: 'student', name: '', email: '', year: 3, semester: 5 })
-    setMessage('User created.')
+    setUserForm({ id: '', role: 'student', name: '', email: '', year: 3, semester: 5, isEditing: false })
+    setMessage(userForm.isEditing ? 'User updated.' : 'User created.')
     await reload()
+  }
+
+  async function deleteUser(userId: string) {
+    await apiJson('/api/academic/users', { method: 'DELETE', body: JSON.stringify({ id: userId }) })
+    await reload()
+  }
+
+  function editUser(user: AcademicUser) {
+    setUserForm({ id: user.id, role: user.role, name: user.name, email: user.email, year: user.year ?? 3, semester: user.semester ?? 5, isEditing: true })
+  }
+
+  async function saveSubject() {
+    await apiJson('/api/academic/subjects', {
+      method: subjectForm.isEditing ? 'PATCH' : 'POST',
+      body: JSON.stringify(subjectForm),
+    })
+    setSubjectForm({ id: '', code: '', name: '', description: '', year: 3, semester: 5, teacherId: teachers[0]?.id ?? '', isEditing: false })
+    setMessage(subjectForm.isEditing ? 'Subject updated.' : 'Subject created.')
+    await reload()
+  }
+  
+  async function deleteSubject(subjectId: string) {
+    await apiJson('/api/academic/subjects', { method: 'DELETE', body: JSON.stringify({ id: subjectId }) })
+    await reload()
+  }
+  
+  function editSubject(subject: Subject) {
+    setSubjectForm({ id: subject.id, code: subject.code, name: subject.name, description: subject.description, year: subject.year, semester: subject.semester, teacherId: subject.teacherId, isEditing: true })
   }
 
   async function assignStudent(studentId: string, assigned: boolean) {
@@ -666,83 +704,152 @@ function AdminPanel({ workspace, reload }: { workspace: AcademicWorkspace; reloa
     await reload()
   }
 
+  async function assignTeacher(subjectId: string, teacherId: string) {
+    if (!subjectId || !teacherId) return
+    await apiJson('/api/academic/assignments', {
+      method: 'POST',
+      body: JSON.stringify({ subjectId, userId: teacherId, kind: 'teacher' }),
+    })
+    await reload()
+  }
+
   return (
-    <div className="grid gap-6 xl:grid-cols-[.8fr_1.2fr]">
-      <section className="rounded-lg border border-white/70 bg-white/75 p-5 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="eyebrow">Super admin</p>
-            <h2 className="mt-1 font-display text-xl font-semibold">Create users</h2>
-          </div>
-          <UserPlus size={18} className="text-primary" />
-        </div>
-        <div className="mt-5 grid gap-3">
-          <select className="text-input" value={userForm.role} onChange={(event) => setUserForm((form) => ({ ...form, role: event.target.value as AcademicRole }))}>
-            <option value="student">Student</option>
-            <option value="teacher">Teacher</option>
-            <option value="super-admin">Super admin</option>
-          </select>
-          <input className="text-input" value={userForm.name} onChange={(event) => setUserForm((form) => ({ ...form, name: event.target.value }))} placeholder="Full name" />
-          <input className="text-input" value={userForm.email} onChange={(event) => setUserForm((form) => ({ ...form, email: event.target.value }))} placeholder="email@college.edu" />
-          {userForm.role === 'student' && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <input className="text-input" type="number" value={userForm.year} onChange={(event) => setUserForm((form) => ({ ...form, year: Number(event.target.value) }))} placeholder="Year" />
-              <input className="text-input" type="number" value={userForm.semester} onChange={(event) => setUserForm((form) => ({ ...form, semester: Number(event.target.value) }))} placeholder="Semester" />
+    <div className="grid gap-6">
+      <div className="grid gap-6 xl:grid-cols-2">
+        <section className="rounded-lg border border-white/70 bg-white/75 p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <p className="eyebrow">User Management</p>
+              <h2 className="mt-1 font-display text-xl font-semibold">Users</h2>
             </div>
-          )}
-          <Button className="rounded-lg" disabled={!userForm.name.trim() || !userForm.email.trim()} onClick={() => void createUser()}>
-            <Plus size={16} /> Add user
-          </Button>
-        </div>
-        {message && <p className="mt-4 rounded-lg bg-primary/10 p-3 text-xs text-primary">{message}</p>}
-      </section>
+            <UserPlus size={18} className="text-primary" />
+          </div>
+          <div className="grid gap-3">
+            <select className="text-input" value={userForm.role} onChange={(event) => setUserForm((form) => ({ ...form, role: event.target.value as AcademicRole }))}>
+              <option value="student">Student</option>
+              <option value="teacher">Teacher</option>
+              <option value="super-admin">Super admin</option>
+            </select>
+            <input className="text-input" value={userForm.name} onChange={(event) => setUserForm((form) => ({ ...form, name: event.target.value }))} placeholder="Full name" />
+            <input className="text-input" value={userForm.email} onChange={(event) => setUserForm((form) => ({ ...form, email: event.target.value }))} placeholder="email@college.edu" />
+            {userForm.role === 'student' && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <input className="text-input" type="number" value={userForm.year} onChange={(event) => setUserForm((form) => ({ ...form, year: Number(event.target.value) }))} placeholder="Year" />
+                <input className="text-input" type="number" value={userForm.semester} onChange={(event) => setUserForm((form) => ({ ...form, semester: Number(event.target.value) }))} placeholder="Semester" />
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Button className="rounded-lg flex-1" disabled={!userForm.name.trim() || !userForm.email.trim()} onClick={() => void saveUser()}>
+                <Check size={16} /> {userForm.isEditing ? 'Update user' : 'Add user'}
+              </Button>
+              {userForm.isEditing && (
+                <Button variant="outline" onClick={() => setUserForm({ id: '', role: 'student', name: '', email: '', year: 3, semester: 5, isEditing: false })}>Cancel</Button>
+              )}
+            </div>
+          </div>
+          <div className="mt-5 grid gap-2 max-h-64 overflow-y-auto pr-2">
+            {workspace.users.map((user) => (
+              <div key={user.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-white/70 p-3">
+                <div>
+                  <p className="text-sm font-semibold">{user.name} <Badge tone="default">{user.role}</Badge></p>
+                  <p className="text-xs text-muted-foreground">{user.email}</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="h-7 rounded-md px-2" onClick={() => editUser(user)}>Edit</Button>
+                  <Button variant="destructive" size="sm" className="h-7 rounded-md px-2 text-white" onClick={() => void deleteUser(user.id)}>Del</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-white/70 bg-white/75 p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <p className="eyebrow">Subject Management</p>
+              <h2 className="mt-1 font-display text-xl font-semibold">Subjects</h2>
+            </div>
+            <BookOpen size={18} className="text-primary" />
+          </div>
+          <div className="grid gap-3">
+            <div className="grid gap-3 sm:grid-cols-[1fr_2fr]">
+              <input className="text-input" value={subjectForm.code} onChange={(event) => setSubjectForm((form) => ({ ...form, code: event.target.value }))} placeholder="Code (CS 101)" />
+              <input className="text-input" value={subjectForm.name} onChange={(event) => setSubjectForm((form) => ({ ...form, name: event.target.value }))} placeholder="Subject Name" />
+            </div>
+            <input className="text-input" value={subjectForm.description} onChange={(event) => setSubjectForm((form) => ({ ...form, description: event.target.value }))} placeholder="Description" />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <input className="text-input" type="number" value={subjectForm.year} onChange={(event) => setSubjectForm((form) => ({ ...form, year: Number(event.target.value) }))} placeholder="Year" />
+              <input className="text-input" type="number" value={subjectForm.semester} onChange={(event) => setSubjectForm((form) => ({ ...form, semester: Number(event.target.value) }))} placeholder="Semester" />
+            </div>
+            {!subjectForm.isEditing && (
+              <select className="text-input" value={subjectForm.teacherId} onChange={(event) => setSubjectForm((form) => ({ ...form, teacherId: event.target.value }))}>
+                <option value="">Assign Teacher...</option>
+                {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            )}
+            <div className="flex gap-2">
+              <Button className="rounded-lg flex-1" disabled={!subjectForm.name.trim() || !subjectForm.code.trim()} onClick={() => void saveSubject()}>
+                <Check size={16} /> {subjectForm.isEditing ? 'Update subject' : 'Add subject'}
+              </Button>
+              {subjectForm.isEditing && (
+                <Button variant="outline" onClick={() => setSubjectForm({ id: '', code: '', name: '', description: '', year: 3, semester: 5, teacherId: teachers[0]?.id ?? '', isEditing: false })}>Cancel</Button>
+              )}
+            </div>
+          </div>
+          <div className="mt-5 grid gap-2 max-h-64 overflow-y-auto pr-2">
+            {workspace.subjects.map((subject) => (
+              <div key={subject.id} className="flex flex-col gap-2 rounded-lg border border-border bg-white/70 p-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold">{subject.code}: {subject.name}</p>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" className="h-7 rounded-md px-2" onClick={() => editSubject(subject)}>Edit</Button>
+                    <Button variant="destructive" size="sm" className="h-7 rounded-md px-2 text-white" onClick={() => void deleteSubject(subject.id)}>Del</Button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Teacher:</span>
+                  <select className="text-input py-1 text-xs h-7 min-w-0" value={subject.teacherId} onChange={(e) => void assignTeacher(subject.id, e.target.value)}>
+                    <option value="">Unassigned</option>
+                    {teachers.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
 
       <section className="rounded-lg border border-white/70 bg-white/75 p-5 shadow-sm">
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
           <div>
-            <p className="eyebrow">Assignments</p>
-            <h2 className="mt-1 font-display text-xl font-semibold">Students and subjects</h2>
+            <p className="eyebrow">Student Enrollment</p>
+            <h2 className="mt-1 font-display text-xl font-semibold">Assign students to subjects</h2>
           </div>
           <select className="text-input max-w-xs" value={assignmentSubjectId} onChange={(event) => setAssignmentSubjectId(event.target.value)}>
-            {workspace.subjects.map((subject) => (
+            {workspace.subjects.length ? workspace.subjects.map((subject) => (
               <option key={subject.id} value={subject.id}>
                 {subject.code} · {subject.name}
               </option>
-            ))}
+            )) : <option value="">No subjects available</option>}
           </select>
         </div>
-        <div className="mt-5 grid gap-5">
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Teachers</p>
-            <div className="grid gap-2">
-              {teachers.map((teacher) => (
-                <div key={teacher.id} className="rounded-lg border border-border bg-white/70 p-3">
-                  <p className="text-sm font-semibold">{teacher.name}</p>
-                  <p className="text-xs text-muted-foreground">{teacher.email}</p>
+        <div className="mt-5 grid gap-2 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
+          {students.map((student) => {
+            const assigned = workspace.enrollments.some((enrollment) => enrollment.subjectId === assignmentSubjectId && enrollment.studentId === student.id)
+            return (
+              <div key={student.id} className="flex flex-col justify-between gap-3 rounded-lg border border-border bg-white/70 p-3">
+                <div>
+                  <p className="text-sm font-semibold">{student.name}</p>
+                  <p className="text-xs text-muted-foreground">Year {student.year} · Sem {student.semester}</p>
                 </div>
-              ))}
-            </div>
-          </div>
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Students</p>
-            <div className="grid gap-2">
-              {students.map((student) => {
-                const assigned = workspace.enrollments.some((enrollment) => enrollment.subjectId === assignmentSubjectId && enrollment.studentId === student.id)
-                return (
-                  <div key={student.id} className="flex items-center justify-between gap-3 rounded-lg border border-border bg-white/70 p-3">
-                    <div>
-                      <p className="text-sm font-semibold">{student.name}</p>
-                      <p className="text-xs text-muted-foreground">Year {student.year} · Sem {student.semester} · {student.email}</p>
-                    </div>
-                    <Button variant={assigned ? 'secondary' : 'outline'} className="rounded-lg" onClick={() => void assignStudent(student.id, assigned)}>
-                      {assigned ? <Check size={15} /> : <Plus size={15} />} {assigned ? 'Enrolled' : 'Enroll'}
-                    </Button>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
+                <Button variant={assigned ? 'secondary' : 'outline'} className="rounded-lg w-full" onClick={() => void assignStudent(student.id, assigned)} disabled={!assignmentSubjectId}>
+                  {assigned ? <Check size={15} /> : <Plus size={15} />} {assigned ? 'Enrolled' : 'Enroll'}
+                </Button>
+              </div>
+            )
+          })}
         </div>
+        {message && <p className="mt-4 rounded-lg bg-primary/10 p-3 text-xs text-primary">{message}</p>}
       </section>
     </div>
   )
@@ -821,6 +928,33 @@ function StudentSubjectPage({
   )
 }
 
+const PdfIcon = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`text-red-500 ${className}`}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <path d="M9 15h6" />
+    <path d="M9 11h6" />
+  </svg>
+)
+
+const DocIcon = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`text-blue-500 ${className}`}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <path d="M9 15h6" />
+    <path d="M9 11h6" />
+    <path d="M9 19h4" />
+  </svg>
+)
+
+const PptIcon = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`text-orange-500 ${className}`}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <circle cx="12" cy="14" r="3" />
+  </svg>
+)
+
 function StudentLecturePage({
   workspace,
   subject,
@@ -876,6 +1010,25 @@ function StudentLecturePage({
           <div className="mt-4 rounded-lg border border-border bg-white/70 p-4">
             <p className="mb-2 text-sm font-semibold">Notes</p>
             <p className="whitespace-pre-wrap text-sm leading-7 text-foreground">{lecture.notes || 'No notes have been added for this lecture yet.'}</p>
+            {lecture.notes && (
+              <div className="mt-5 border-t border-border pt-4">
+                <p className="mb-3 text-xs font-semibold uppercase text-muted-foreground">Source Attachments</p>
+                <div className="flex flex-wrap gap-3">
+                  <div className="flex items-center gap-2 rounded-lg border border-border bg-white p-2 pr-3 shadow-sm">
+                    <div className="rounded bg-red-100 p-1.5"><PdfIcon size={14} /></div>
+                    <span className="text-xs font-medium">Lecture_Slides.pdf</span>
+                  </div>
+                  <div className="flex items-center gap-2 rounded-lg border border-border bg-white p-2 pr-3 shadow-sm">
+                    <div className="rounded bg-blue-100 p-1.5"><DocIcon size={14} /></div>
+                    <span className="text-xs font-medium">Topic_Summary.docx</span>
+                  </div>
+                  <div className="flex items-center gap-2 rounded-lg border border-border bg-white p-2 pr-3 shadow-sm">
+                    <div className="rounded bg-orange-100 p-1.5"><PptIcon size={14} /></div>
+                    <span className="text-xs font-medium">Presentation.pptx</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
         <aside className="rounded-lg border border-white/70 bg-white/75 p-5 shadow-sm">
@@ -884,12 +1037,28 @@ function StudentLecturePage({
           <div className="mt-5 grid gap-3">
             <Button className="rounded-lg justify-start" onClick={onChat}><MessageSquareText size={15} /> Chat with lecture</Button>
             <Button variant="outline" className="rounded-lg justify-start" onClick={onCall}><Phone size={15} /> Call lecture agent</Button>
-            <Button variant="outline" className="rounded-lg justify-start" onClick={() => void startReplay()} disabled={!lecture.notes.trim()}><Play size={15} /> Virtual classroom replay</Button>
+            <div className="relative">
+              <Button variant="outline" className="w-full rounded-lg justify-start opacity-50" disabled title="This feature is under development">
+                <Play size={15} className="mr-2" /> Virtual classroom replay
+              </Button>
+              <div className="absolute inset-0 z-10 flex items-center justify-center">
+                <span className="rounded-full bg-orange-100 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-orange-600 shadow-sm border border-orange-200">
+                  Feature under development
+                </span>
+              </div>
+            </div>
           </div>
-          <label className="field-label mt-5 block">
-            Replay focus
-            <input className="text-input mt-2" value={focus} onChange={(event) => setFocus(event.target.value)} placeholder="Example: explain this in Marathi" />
-          </label>
+          <div className="relative mt-5">
+            <label className="field-label block opacity-50">
+              Replay focus
+              <input className="text-input mt-2 cursor-not-allowed" value={focus} onChange={(event) => setFocus(event.target.value)} placeholder="Example: explain this in Marathi" disabled />
+            </label>
+            <div className="absolute inset-0 z-10 flex items-center justify-center">
+              <span className="rounded-full bg-orange-100 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-orange-600 shadow-sm border border-orange-200">
+                Feature under development
+              </span>
+            </div>
+          </div>
           {message && <p className="mt-4 rounded-lg bg-primary/10 p-3 text-xs text-primary">{message}</p>}
         </aside>
       </div>
@@ -905,26 +1074,109 @@ function TeacherClassroom({ workspace, reload }: { workspace: AcademicWorkspace;
   const lectures = workspace.lectures.filter((lecture) => lecture.subjectId === selectedSubjectId)
   const doubts = workspace.doubts.filter((doubt) => doubt.subjectId === selectedSubjectId)
   const selectedDoubt = workspace.doubts.find((doubt) => doubt.id === selectedDoubtId)
-  const [lectureForm, setLectureForm] = useState({ title: '', topic: '', moduleId: modules[0]?.id ?? '', notes: '' })
+  
+  const [lectureForm, setLectureForm] = useState({ id: '', title: '', topic: '', moduleId: modules[0]?.id ?? '', notes: '', isEditing: false })
+  const [moduleForm, setModuleForm] = useState({ title: '' })
   const [message, setMessage] = useState<string | null>(null)
   const activeModuleId = lectureForm.moduleId || modules[0]?.id || ''
+  
+  const [isRecording, setIsRecording] = useState(false)
+  const [isProcessingVoice, setIsProcessingVoice] = useState(false)
+  const wavRecorderRef = useRef<WavRecorder | null>(null)
 
-  async function addLecture() {
+  useEffect(() => {
+    return () => {
+      wavRecorderRef.current?.stop()
+    }
+  }, [])
+
+  async function createModule() {
+    if (!subject || !moduleForm.title.trim()) return
+    await apiJson('/api/academic/modules', {
+      method: 'POST',
+      body: JSON.stringify({ subjectId: subject.id, title: moduleForm.title }),
+    })
+    setModuleForm({ title: '' })
+    setMessage('Module created.')
+    await reload()
+  }
+
+  async function saveLecture() {
     if (!subject || !activeModuleId) return
     await apiJson('/api/academic/lectures', {
-      method: 'POST',
+      method: lectureForm.isEditing ? 'PATCH' : 'POST',
       body: JSON.stringify({
+        id: lectureForm.isEditing ? lectureForm.id : undefined,
         subjectId: subject.id,
         moduleId: activeModuleId,
         title: lectureForm.title,
         topic: lectureForm.topic,
         notes: lectureForm.notes,
         createdBy: workspace.viewer.id,
+        status: 'ready'
       }),
     })
-    setLectureForm({ title: '', topic: '', moduleId: modules[0]?.id ?? '', notes: '' })
-    setMessage('Lecture created and indexed if notes were provided.')
+    setLectureForm({ id: '', title: '', topic: '', moduleId: modules[0]?.id ?? '', notes: '', isEditing: false })
+    setMessage(lectureForm.isEditing ? 'Lecture updated and indexed.' : 'Lecture created and indexed.')
     await reload()
+  }
+
+  function editLecture(lecture: Lecture) {
+    setLectureForm({
+      id: lecture.id,
+      title: lecture.title,
+      topic: lecture.topic,
+      moduleId: lecture.moduleId,
+      notes: lecture.notes,
+      isEditing: true
+    })
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })
+  }
+
+  function handleFileUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const text = e.target?.result as string
+      setLectureForm((form) => ({ ...form, notes: form.notes ? form.notes + '\n\n' + text : text }))
+    }
+    reader.readAsText(file)
+  }
+
+  async function toggleVoiceRecording() {
+    if (isRecording) {
+      setIsRecording(false)
+      setIsProcessingVoice(true)
+      try {
+        await wavRecorderRef.current?.pause()
+        const result = await wavRecorderRef.current?.end()
+        if (result?.audio) {
+          const formData = new FormData()
+          formData.append('audio', result.audio, 'notes.wav')
+          const response = await fetch('/api/academic/transcribe', { method: 'POST', body: formData })
+          const payload = await response.json()
+          if (payload.transcript) {
+            setLectureForm((form) => ({ ...form, notes: form.notes ? form.notes + '\n\n' + payload.transcript : payload.transcript }))
+            setMessage('Voice notes transcribed and added.')
+          }
+        }
+      } catch (err) {
+        setMessage('Voice transcription failed.')
+      } finally {
+        setIsProcessingVoice(false)
+      }
+    } else {
+      try {
+        wavRecorderRef.current = new WavRecorder({ sampleRate: 16000 })
+        await wavRecorderRef.current.begin()
+        await wavRecorderRef.current.record(() => {})
+        setIsRecording(true)
+        setMessage('Recording voice notes...')
+      } catch (err) {
+        setMessage('Microphone access denied or error.')
+      }
+    }
   }
 
   return (
@@ -955,49 +1207,79 @@ function TeacherClassroom({ workspace, reload }: { workspace: AcademicWorkspace;
           </div>
         )}
 
-        <div className="grid gap-3">
-          {completedLectures(lectures).map((lecture) => (
-            <div key={lecture.id} className="rounded-lg border border-border bg-white/75 p-4">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-[10px] uppercase text-muted-foreground">Lecture {lecture.sequence}</span>
-                    <Badge tone={lecture.status === 'live' ? 'success' : 'accent'}>{lecture.status}</Badge>
-                  </div>
-                  <h3 className="mt-2 text-base font-semibold">{lecture.title}</h3>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{summarizeText(lecture.notes, lecture.topic, 3)}</p>
+        <div className="grid gap-4">
+          {modules.map((moduleUnit) => {
+            const moduleLectures = lectures.filter(l => l.moduleId === moduleUnit.id)
+            return (
+              <div key={moduleUnit.id} className="border border-border rounded-lg p-4 bg-white/40">
+                <h3 className="font-semibold text-lg mb-3">{moduleUnit.title}</h3>
+                <div className="grid gap-3">
+                  {moduleLectures.length === 0 ? <p className="text-sm text-muted-foreground">No lectures yet.</p> : moduleLectures.map((lecture) => (
+                    <div key={lecture.id} className="flex items-center justify-between rounded-lg border border-border bg-white p-4">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-[10px] uppercase text-muted-foreground">Lecture {lecture.sequence}</span>
+                          <Badge tone={lecture.status === 'live' ? 'success' : 'accent'}>{lecture.status}</Badge>
+                        </div>
+                        <h4 className="mt-2 text-base font-semibold">{lecture.title}</h4>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">{summarizeText(lecture.notes, lecture.topic, 3)}</p>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={() => editLecture(lecture)}>Edit</Button>
+                    </div>
+                  ))}
                 </div>
-                <FileText size={17} className="text-primary" />
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
 
-        <div className="mt-6 border-t border-border pt-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="font-display text-lg font-semibold">Create lecture</h3>
-            <Plus size={18} className="text-primary" />
+        <div className="mt-6 border-t border-border pt-5 grid gap-6 xl:grid-cols-2">
+          <div>
+            <div className="mb-4">
+              <h3 className="font-display text-lg font-semibold">Create Module</h3>
+            </div>
+            <div className="flex gap-2">
+              <input className="text-input flex-1" value={moduleForm.title} onChange={(event) => setModuleForm({ title: event.target.value })} placeholder="Module Title" />
+              <Button className="rounded-lg" onClick={() => void createModule()} disabled={!moduleForm.title.trim()}>Add</Button>
+            </div>
           </div>
-          <div className="grid gap-3">
-            <select className="text-input" value={activeModuleId} onChange={(event) => setLectureForm((form) => ({ ...form, moduleId: event.target.value }))}>
-              {modules.map((moduleUnit) => (
-                <option key={moduleUnit.id} value={moduleUnit.id}>{moduleUnit.title}</option>
-              ))}
-            </select>
-            <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="font-display text-lg font-semibold">{lectureForm.isEditing ? 'Edit lecture' : 'Create lecture'}</h3>
+              {lectureForm.isEditing && <Button variant="outline" size="sm" onClick={() => setLectureForm({ id: '', title: '', topic: '', moduleId: modules[0]?.id ?? '', notes: '', isEditing: false })}>Cancel</Button>}
+            </div>
+            <div className="grid gap-3">
+              <select className="text-input" value={activeModuleId} onChange={(event) => setLectureForm((form) => ({ ...form, moduleId: event.target.value }))}>
+                {modules.map((moduleUnit) => (
+                  <option key={moduleUnit.id} value={moduleUnit.id}>{moduleUnit.title}</option>
+                ))}
+              </select>
               <input className="text-input" value={lectureForm.title} onChange={(event) => setLectureForm((form) => ({ ...form, title: event.target.value }))} placeholder="Lecture title" />
               <input className="text-input" value={lectureForm.topic} onChange={(event) => setLectureForm((form) => ({ ...form, topic: event.target.value }))} placeholder="Topic" />
+              
+              <div className="flex gap-2 mt-2">
+                <label className="flex-1 w-full relative">
+                  <Button variant="outline" className="w-full h-10 pointer-events-none">
+                    <FileText size={15} className="mr-2"/> Upload Doc
+                  </Button>
+                  <input type="file" accept=".txt,.md" className="absolute inset-0 opacity-0 cursor-pointer" onChange={handleFileUpload} />
+                </label>
+                <Button variant="outline" className="flex-1 rounded-lg" disabled title="Voice feature is under process">
+                  <Mic size={15} className="mr-2 opacity-50" /> <span className="opacity-50">Record (Under Process)</span>
+                </Button>
+              </div>
+
+              <textarea className="text-input min-h-28" value={lectureForm.notes} onChange={(event) => setLectureForm((form) => ({ ...form, notes: event.target.value }))} placeholder="Lecture notes will appear here..." />
+              <Button className="rounded-lg" disabled={!lectureForm.title.trim() || !lectureForm.topic.trim()} onClick={() => void saveLecture()}>
+                <Check size={15} className="mr-2"/> {lectureForm.isEditing ? 'Save changes' : 'Create lecture'}
+              </Button>
+              {message && <p className="rounded-lg bg-primary/10 p-3 text-xs text-primary">{message}</p>}
             </div>
-            <textarea className="text-input min-h-28" value={lectureForm.notes} onChange={(event) => setLectureForm((form) => ({ ...form, notes: event.target.value }))} placeholder="Paste notes or sync them from Connectors" />
-            <Button className="rounded-lg" disabled={!lectureForm.title.trim() || !lectureForm.topic.trim()} onClick={() => void addLecture()}>
-              <Plus size={15} /> Create lecture
-            </Button>
-            {message && <p className="rounded-lg bg-primary/10 p-3 text-xs text-primary">{message}</p>}
           </div>
         </div>
       </section>
 
-      <section className="rounded-lg border border-white/70 bg-white/75 p-5 shadow-sm">
+      <section className="rounded-lg border border-white/70 bg-white/75 p-5 shadow-sm self-start">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <p className="eyebrow">Student doubts</p>
@@ -1010,7 +1292,7 @@ function TeacherClassroom({ workspace, reload }: { workspace: AcademicWorkspace;
             doubts.map((doubt) => (
               <button key={doubt.id} className={`rounded-lg border p-3 text-left ${doubt.id === selectedDoubtId ? 'border-primary bg-primary/5' : 'border-border bg-white/70'}`} onClick={() => setSelectedDoubtId(doubt.id)}>
                 <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-semibold">{doubt.studentName}</p>
+                  <p className="text-sm font-semibold">{workspace.users.find(u => u.id === doubt.studentId)?.name || 'Student'}</p>
                   <Badge tone={doubt.status === 'open' ? 'warning' : 'success'}>{doubt.status}</Badge>
                 </div>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">{doubt.summary}</p>
@@ -1025,13 +1307,35 @@ function TeacherClassroom({ workspace, reload }: { workspace: AcademicWorkspace;
             <p className="eyebrow">Conversation summary</p>
             <p className="mt-3 text-sm font-semibold">{selectedDoubt.question}</p>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">{selectedDoubt.summary}</p>
-            <div className="mt-3 rounded-lg bg-muted p-3 text-xs leading-5 text-muted-foreground">{selectedDoubt.aiResponse}</div>
+            <div className="mt-3 rounded-lg bg-muted p-3 text-xs leading-5 text-foreground whitespace-pre-wrap">{selectedDoubt.aiResponse}</div>
           </div>
         )}
       </section>
     </div>
   )
 }
+
+const GoogleDriveIcon = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 87.3 78" className={className}>
+    <path d="M58.3 78L29.1 78 0 27.9 29.1 27.9z" fill="#1A73E8" />
+    <path d="M58.3 78L87.3 27.9 58.1 27.9 29.1 78z" fill="#188038" />
+    <path d="M87.3 27.9L58.1 0 29.1 0 58.3 27.9z" fill="#EA4335" />
+    <path d="M0 27.9L29.1 0 58.1 0 29.1 27.9z" fill="#F9AB00" />
+  </svg>
+)
+
+const GoogleClassroomIcon = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className}>
+    <path d="M4 2h16c1.1 0 2 .9 2 2v16c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2z" fill="#F4B400"/>
+    <path d="M3.5 3.5h17v17h-17z" fill="#0F9D58"/>
+    <circle cx="12" cy="9.5" r="3" fill="#FFFFFF"/>
+    <path d="M12 13.5c-3 0-7 1.5-7 4.5v1.5h14v-1.5c0-3-4-4.5-7-4.5z" fill="#FFFFFF"/>
+    <circle cx="6.5" cy="11.5" r="2" fill="#81C784"/>
+    <path d="M6.5 14.5c-1.5 0-4 .75-4 2.5V19h3.7c-.15-.4-.2-.8-.2-1.2 0-1.6 1.4-3 3-3.3z" fill="#81C784"/>
+    <circle cx="17.5" cy="11.5" r="2" fill="#81C784"/>
+    <path d="M17.5 14.5c-.8.4-1.8 1.4-2.5 3.3 0 .4-.05.8-.2 1.2h3.7v-2c0-1.75-2.5-2.5-4-2.5z" fill="#81C784"/>
+  </svg>
+)
 
 function ConnectorsView({ workspace, reload }: { workspace: AcademicWorkspace; reload: () => Promise<void> }) {
   const teacherLectures = workspace.lectures.filter((lecture) => lecture.createdBy === workspace.viewer.id || workspace.subjects.some((subject) => subject.id === lecture.subjectId))
@@ -1056,67 +1360,65 @@ function ConnectorsView({ workspace, reload }: { workspace: AcademicWorkspace; r
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[.9fr_1.1fr]">
-      <section className="rounded-lg border border-white/70 bg-white/75 p-5 shadow-sm">
-        <p className="eyebrow">Connectors</p>
-        <h1 className="mt-2 font-display text-3xl font-semibold">Fetch notes from configured platforms</h1>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">Connected sources are available to the faculty assistant and can be synced into any assigned lecture.</p>
-        <div className="mt-5 grid gap-3">
+    <div className="flex flex-col gap-6 max-w-4xl mx-auto mt-4">
+      <section className="rounded-xl border border-white/70 bg-white/75 p-10 shadow-sm flex flex-col items-center text-center">
+        <p className="eyebrow">Active Connectors</p>
+        <h1 className="mt-3 font-display text-3xl font-semibold">Configured Platforms</h1>
+        <p className="mt-3 max-w-lg text-sm leading-6 text-muted-foreground">
+          Connected sources are available to the faculty assistant and can be synced into any assigned lecture.
+        </p>
+        <div className="mt-8 flex flex-wrap justify-center gap-6">
           {workspace.connectors.map((connector) => (
-            <div key={connector.id} className="rounded-lg border border-border bg-white/70 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold">{connector.name}</p>
-                  <p className="mt-1 font-mono text-[10px] uppercase text-muted-foreground">{connector.provider}</p>
-                </div>
-                <Badge tone={connector.status === 'connected' ? 'success' : 'warning'}>{connector.status}</Badge>
-              </div>
-              <p className="mt-3 text-xs leading-5 text-muted-foreground">{connector.availableNotes}</p>
+            <div key={connector.id} className="flex h-24 w-24 items-center justify-center rounded-2xl border border-border bg-white shadow-sm hover:shadow-md transition-shadow">
+              {connector.provider === 'google-drive' ? (
+                <GoogleDriveIcon size={48} />
+              ) : connector.provider === 'google-classroom' ? (
+                <GoogleClassroomIcon size={48} />
+              ) : (
+                <p className="font-mono text-[10px] uppercase text-muted-foreground">{connector.provider}</p>
+              )}
             </div>
           ))}
         </div>
-      </section>
-      <section className="rounded-lg border border-white/70 bg-white/75 p-5 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="eyebrow">Sync notes</p>
-            <h2 className="mt-1 font-display text-xl font-semibold">Attach connector data to lecture</h2>
-          </div>
-          <Database size={18} className="text-primary" />
-        </div>
-        <div className="mt-5 grid gap-3">
-          <select className="text-input" value={connectorId} onChange={(event) => setConnectorId(event.target.value)}>
-            {workspace.connectors.map((connector) => (
-              <option key={connector.id} value={connector.id}>{connector.name}</option>
-            ))}
-          </select>
-          <select className="text-input" value={lectureId} onChange={(event) => setLectureId(event.target.value)}>
-            {teacherLectures.map((lecture) => (
-              <option key={lecture.id} value={lecture.id}>{lecture.title}</option>
-            ))}
-          </select>
-          <Button className="rounded-lg" disabled={!connectorId || !lectureId} onClick={() => void syncNotes()}>
-            <Cloud size={15} /> Fetch and index notes
-          </Button>
-        </div>
-        {message && <p className="mt-4 rounded-lg bg-primary/10 p-3 text-xs text-primary">{message}</p>}
-        {error && <p className="mt-4 rounded-lg bg-destructive/10 p-3 text-xs text-destructive">{error}</p>}
       </section>
     </div>
   )
 }
 
+type ChatMessage = { role: 'user' | 'assistant'; content: string; citations?: RagResult['citations'] }
+
 function ChatView({ userId, context, onBack }: { userId: string; context: LectureContext | undefined; onBack: () => void }) {
   const [prompt, setPrompt] = useState('')
-  const [result, setResult] = useState<RagResult | null>(null)
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [endingChat, setEndingChat] = useState(false)
+
+  useEffect(() => {
+    if (context && userId) {
+      const cacheKey = `chat_${userId}_${context.lectureId}`
+      const cached = localStorage.getItem(cacheKey)
+      if (cached) {
+        try { setMessages(JSON.parse(cached)) } catch (e) {}
+      }
+    }
+  }, [context, userId])
+
+  useEffect(() => {
+    if (context && userId && messages.length > 0) {
+      const cacheKey = `chat_${userId}_${context.lectureId}`
+      localStorage.setItem(cacheKey, JSON.stringify(messages))
+    }
+  }, [messages, context, userId])
 
   async function ask() {
     if (!context || !prompt.trim()) return
+    const userMessage: ChatMessage = { role: 'user', content: prompt }
+    const newMessages = [...messages, userMessage]
+    setMessages(newMessages)
+    setPrompt('')
     setLoading(true)
     setError(null)
-    setResult(null)
 
     try {
       const payload = await apiJson<RagResult>('/api/rag/query', {
@@ -1124,11 +1426,11 @@ function ChatView({ userId, context, onBack }: { userId: string; context: Lectur
         body: JSON.stringify({
           mode: 'chat',
           studentId: userId,
-          prompt,
+          prompt: userMessage.content,
           context,
         }),
       })
-      setResult(payload)
+      setMessages([...newMessages, { role: 'assistant', content: payload.answer, citations: payload.citations }])
     } catch (queryError) {
       setError(queryError instanceof Error ? queryError.message : 'Unable to query lecture RAG.')
     } finally {
@@ -1136,44 +1438,80 @@ function ChatView({ userId, context, onBack }: { userId: string; context: Lectur
     }
   }
 
+  async function endChat() {
+    if (!context || messages.length === 0) return
+    setEndingChat(true)
+    setError(null)
+    try {
+      const firstQuestion = messages.find(m => m.role === 'user')?.content || 'No question'
+      const aiResponse = messages.filter(m => m.role === 'assistant').map(m => m.content).join('\n\n')
+      
+      await apiJson('/api/academic/doubts', {
+        method: 'POST',
+        body: JSON.stringify({
+          subjectId: context.courseId,
+          lectureId: context.lectureId,
+          studentId: userId,
+          question: firstQuestion,
+          aiResponse: aiResponse.slice(0, 1000)
+        })
+      })
+      
+      localStorage.removeItem(`chat_${userId}_${context.lectureId}`)
+      onBack()
+    } catch (e) {
+      setError('Failed to end chat and save doubt summary.')
+      setEndingChat(false)
+    }
+  }
+
   return (
-    <section className="mx-auto max-w-4xl rounded-lg border border-white/70 bg-white/75 shadow-sm">
-      <div className="border-b border-border p-5">
-        <button className="back-link mb-4" onClick={onBack}><ArrowLeft size={15} /> Back</button>
-        <p className="eyebrow">RAG-grounded chat</p>
-        <h1 className="mt-2 font-display text-3xl font-semibold">{context?.lectureTitle ?? 'Select context'}</h1>
-        <p className="mt-2 text-sm text-muted-foreground">{context ? context.courseName : 'Chat needs active lecture or subject context.'}</p>
-      </div>
-      <div className="min-h-80 p-5">
-        {!context ? (
-          <EmptyState title="Context missing" description="Open a subject or lecture before asking AI." />
-        ) : result || error || loading ? (
-          <div className="space-y-4">
-            <div className="ml-auto max-w-2xl rounded-lg bg-primary/10 p-4 text-sm">{prompt}</div>
-            {loading && <div className="max-w-2xl rounded-lg border border-border bg-white p-4 text-sm text-muted-foreground">Searching indexed academic notes.</div>}
-            {error && <div className="max-w-2xl rounded-lg border border-destructive/30 bg-white p-4 text-sm text-destructive">{error}</div>}
-            {result && (
-              <div className="max-w-3xl rounded-lg border border-border bg-white p-4">
-                <p className="text-sm leading-7">{result.answer}</p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {result.citations.map((citation) => (
-                    <span key={citation.chunkId} className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 font-mono text-[10px] text-muted-foreground">
-                      <FileText size={12} /> {citation.sourceName} · {citation.section}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <EmptyState title="Ask your doubt" description="Use this for explanations, translations, examples, and lecture-grounded revision." />
+    <section className="mx-auto max-w-4xl rounded-lg border border-white/70 bg-white/75 shadow-sm flex flex-col h-[85vh]">
+      <div className="border-b border-border p-5 flex items-center justify-between shrink-0">
+        <div>
+          <button className="back-link mb-4" onClick={onBack}><ArrowLeft size={15} /> Back</button>
+          <p className="eyebrow">RAG-grounded chat</p>
+          <h1 className="mt-2 font-display text-3xl font-semibold">{context?.lectureTitle ?? 'Select context'}</h1>
+          <p className="mt-2 text-sm text-muted-foreground">{context ? context.courseName : 'Chat needs active lecture or subject context.'}</p>
+        </div>
+        {messages.length > 0 && (
+          <Button variant="destructive" className="rounded-lg text-white" disabled={endingChat} onClick={() => void endChat()}>
+            {endingChat ? <Loader2 className="animate-spin mr-2" size={15} /> : <Check size={15} className="mr-2" />}
+            End Chat
+          </Button>
         )}
       </div>
-      <div className="border-t border-border p-4">
+      <div className="p-5 flex-1 overflow-y-auto space-y-4">
+        {!context ? (
+          <EmptyState title="Context missing" description="Open a subject or lecture before asking AI." />
+        ) : messages.length === 0 ? (
+          <EmptyState title="Ask your doubt" description="Use this for explanations, translations, examples, and lecture-grounded revision." />
+        ) : (
+          <div className="space-y-4">
+            {messages.map((msg, i) => (
+              <div key={i} className={msg.role === 'user' ? 'ml-auto max-w-2xl rounded-lg bg-primary/10 p-4 text-sm' : 'max-w-3xl rounded-lg border border-border bg-white p-4'}>
+                <p className="text-sm leading-7 whitespace-pre-wrap">{msg.content}</p>
+                {msg.citations && (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {msg.citations.map((citation) => (
+                      <span key={citation.chunkId} className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 font-mono text-[10px] text-muted-foreground">
+                        <FileText size={12} /> {citation.sourceName} · {citation.section}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            {loading && <div className="max-w-3xl rounded-lg border border-border bg-white p-4 text-sm text-muted-foreground">Searching indexed academic notes...</div>}
+            {error && <div className="max-w-3xl rounded-lg border border-destructive/30 bg-white p-4 text-sm text-destructive">{error}</div>}
+          </div>
+        )}
+      </div>
+      <div className="border-t border-border p-4 shrink-0">
         <textarea className="text-input min-h-24" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Ask from this context..." />
         <div className="mt-3 flex justify-end">
-          <Button className="rounded-lg" disabled={!context || !prompt.trim() || loading} onClick={() => void ask()}>
-            <ArrowUpRight size={15} /> Ask
+          <Button className="rounded-lg" disabled={!context || !prompt.trim() || loading || endingChat} onClick={() => void ask()}>
+            <ArrowUpRight size={15} className="mr-2" /> Ask
           </Button>
         </div>
       </div>
@@ -1193,20 +1531,17 @@ type SarvamVoiceTurn = {
 }
 
 function CallView({ context, onBack }: { context: LectureContext | undefined; onBack: () => void }) {
-  const [phoneNumber, setPhoneNumber] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('+919373675705')
   const [phoneStatus, setPhoneStatus] = useState<string | null>(null)
   const [voiceStatus, setVoiceStatus] = useState<'idle' | 'recording' | 'processing' | 'answered' | 'error'>('idle')
   const [turn, setTurn] = useState<SarvamVoiceTurn | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [phoneLoading, setPhoneLoading] = useState(false)
-  const recorderRef = useRef<MediaRecorder | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const chunksRef = useRef<Blob[]>([])
+  const wavRecorderRef = useRef<WavRecorder | null>(null)
 
   useEffect(() => {
     return () => {
-      recorderRef.current?.stop()
-      streamRef.current?.getTracks().forEach((track) => track.stop())
+      wavRecorderRef.current?.stop()
     }
   }, [])
 
@@ -1217,7 +1552,8 @@ function CallView({ context, onBack }: { context: LectureContext | undefined; on
 
     try {
       const formData = new FormData()
-      formData.append('audio', audio, `onestop-turn.${audio.type.includes('webm') ? 'webm' : 'wav'}`)
+      const ext = audio.type.includes('webm') ? 'webm' : audio.type.includes('mp4') ? 'mp4' : 'wav'
+      formData.append('audio', audio, `onestop-turn.${ext}`)
       formData.append('context', JSON.stringify(context))
       formData.append('studentId', 'browser-voice-student')
 
@@ -1252,23 +1588,10 @@ function CallView({ context, onBack }: { context: LectureContext | undefined; on
 
     setError(null)
     setTurn(null)
-    chunksRef.current = []
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const recorder = new MediaRecorder(stream)
-      streamRef.current = stream
-      recorderRef.current = recorder
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunksRef.current.push(event.data)
-      }
-      recorder.onstop = () => {
-        stream.getTracks().forEach((track) => track.stop())
-        streamRef.current = null
-        recorderRef.current = null
-        const audio = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' })
-        void submitVoiceTurn(audio)
-      }
-      recorder.start()
+      const recorder = new WavRecorder()
+      wavRecorderRef.current = recorder
+      await recorder.start()
       setVoiceStatus('recording')
     } catch {
       setVoiceStatus('error')
@@ -1276,8 +1599,15 @@ function CallView({ context, onBack }: { context: LectureContext | undefined; on
     }
   }
 
-  function stopVoiceTurn() {
-    recorderRef.current?.stop()
+  async function stopVoiceTurn() {
+    if (!wavRecorderRef.current) return
+    const audio = await wavRecorderRef.current.stop()
+    wavRecorderRef.current = null
+    if (audio.size < 500) {
+      setVoiceStatus('idle')
+      return
+    }
+    void submitVoiceTurn(audio)
   }
 
   async function startCall() {
@@ -1317,13 +1647,14 @@ function CallView({ context, onBack }: { context: LectureContext | undefined; on
         <Badge tone={context ? 'success' : 'warning'}>{context ? 'context active' : 'missing context'}</Badge>
       </div>
 
-      <div className="mt-6 grid gap-5 lg:grid-cols-[1.05fr_.95fr]">
-        <div className="call-voice-panel">
+      <div className="mt-8 flex flex-col items-center justify-center max-w-lg mx-auto">
+        <div className="call-voice-panel text-center w-full">
           <button
-            className={`voice-assistant-orb is-${voiceStatus === 'recording' ? 'listening' : voiceStatus === 'processing' ? 'processing' : voiceStatus === 'answered' ? 'completed' : voiceStatus}`}
-            onClick={voiceStatus === 'recording' ? stopVoiceTurn : startVoiceTurn}
-            disabled={!context || voiceStatus === 'processing'}
-            aria-label={voiceStatus === 'recording' ? 'Stop Sarvam recording' : 'Start Sarvam voice turn'}
+            className={`voice-assistant-orb mx-auto ${phoneLoading ? 'is-processing' : 'is-idle'}`}
+            disabled={!context || phoneLoading}
+            onClick={() => void startCall()}
+            title="Tap to start outbound call"
+            aria-label="Tap to start outbound call"
           >
             <span className="voice-assistant-ring ring-one" />
             <span className="voice-assistant-ring ring-two" />
@@ -1339,57 +1670,22 @@ function CallView({ context, onBack }: { context: LectureContext | undefined; on
               <span />
             </span>
           </button>
-          <div className="voice-assistant-status">
+          <div className="voice-assistant-status mt-8">
             <p className="font-display text-lg font-semibold">
-              {voiceStatus === 'recording'
-                ? 'Listening'
-                : voiceStatus === 'processing'
-                  ? 'Sarvam is processing'
-                  : voiceStatus === 'answered'
-                    ? 'Answer played'
-                    : voiceStatus === 'error'
-                      ? 'Needs attention'
-                      : 'Tap to speak'}
+              {phoneLoading ? 'Initiating call...' : 'Tap mic to receive call'}
             </p>
-            <p>{turn?.transcript ?? 'Ask in English, Marathi, Hindi, or another supported Indian language.'}</p>
-          </div>
-          {turn && (
-            <div className="voice-turn-result">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge tone="accent">{turn.languageCode}</Badge>
-                <Badge>{turn.speaker}</Badge>
-                {turn.fallbackUsed && <Badge tone="warning">course fallback</Badge>}
-              </div>
-              <p className="mt-3 text-sm leading-6">{turn.answer}</p>
-              {turn.citations.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {turn.citations.slice(0, 3).map((citation) => (
-                    <span key={citation.chunkId} className="answer-source">
-                      <FileText size={12} /> {citation.sourceName} · {citation.section}
-                    </span>
-                  ))}
-                </div>
-              )}
+            {phoneStatus ? (
+              <p className="mt-3 rounded-lg bg-primary/10 p-3 text-sm text-primary">{phoneStatus}</p>
+            ) : error ? (
+              <p className="mt-3 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{error}</p>
+            ) : (
+              <p className="mt-3 text-sm text-muted-foreground">
+                We will call {phoneNumber} and connect you with the lecture RAG.
+              </p>
+            )}
+            <div className="mt-5 rounded-lg border border-border bg-white p-3 text-xs text-muted-foreground">
+              <strong className="text-foreground">Context:</strong> {context ? `${context.courseName} · ${context.lectureTitle}` : 'No context selected'}
             </div>
-          )}
-        </div>
-
-        <div className="call-phone-panel">
-          <div>
-            <p className="eyebrow">Phone transport</p>
-            <h2 className="mt-2 font-display text-xl font-semibold">Place Twilio call</h2>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              Twilio connects the phone call; prompts and answers are generated with Sarvam audio endpoints.
-            </p>
-          </div>
-          <label className="field-label">Student phone number<input className="text-input mt-2" value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="+919373675705" inputMode="tel" /></label>
-          <Button className="mt-4 w-full rounded-lg" disabled={!context || !phoneNumber.trim() || phoneLoading} onClick={() => void startCall()}>
-            <Phone size={15} /> {phoneLoading ? 'Starting call...' : 'Start phone call'}
-          </Button>
-          <div className="mt-4 grid gap-2">
-            <div className="rounded-lg border border-border bg-white p-3 text-xs text-muted-foreground"><strong className="text-foreground">Context:</strong> {context ? `${context.courseName} · ${context.lectureTitle}` : 'No context selected'}</div>
-            {phoneStatus && <p className="rounded-lg bg-primary/10 p-3 text-xs text-primary">{phoneStatus}</p>}
-            {error && <p className="rounded-lg bg-destructive/10 p-3 text-xs text-destructive">{error}</p>}
           </div>
         </div>
       </div>
