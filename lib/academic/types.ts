@@ -208,11 +208,14 @@ export type FacultyAssistantInput = {
   subjectId?: string
   connectorId?: string
   command: string
+  confirmationToken?: string
 }
 
 export type FacultyAssistantResult = {
   answer: string
-  action: 'answered' | 'created-lecture' | 'synced-notes' | 'summarized-doubts' | 'blocked'
+  action: 'answered' | 'created-lecture' | 'synced-notes' | 'summarized-doubts' | 'confirmation-required' | 'blocked'
+  confirmationToken?: string
+  proposedAction?: string
   guardrails: string[]
   createdLectureId?: string
   updatedLectureId?: string

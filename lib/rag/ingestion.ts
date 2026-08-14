@@ -1,4 +1,5 @@
 import { hybridLectureRagConfig } from '@/lib/rag/config'
+import { normalizeText, splitSentences } from '@/lib/rag/text'
 import type { FacultySourceDocument, LectureChunk, SentenceUnit } from '@/lib/rag/types'
 
 function countTokens(content: string) {
@@ -6,7 +7,7 @@ function countTokens(content: string) {
 }
 
 function splitIntoChunks(content: string) {
-  const words = content.trim().split(/\s+/).filter(Boolean)
+  const words = normalizeText(content).split(/\s+/u).filter(Boolean)
   const chunkSize = hybridLectureRagConfig.chunkSizeWords
   const overlap = hybridLectureRagConfig.chunkOverlapWords
 
@@ -20,13 +21,6 @@ function splitIntoChunks(content: string) {
     if (start + chunkSize >= words.length) break
   }
   return chunks
-}
-
-function splitIntoSentences(content: string) {
-  return content
-    .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean)
 }
 
 export function ingestFacultyDocuments(documents: FacultySourceDocument[]) {
@@ -57,7 +51,7 @@ export function ingestFacultyDocuments(documents: FacultySourceDocument[]) {
 
 export function ingestSentenceUnits(chunks: LectureChunk[]) {
   return chunks.flatMap<SentenceUnit>((chunk) =>
-    splitIntoSentences(chunk.content).map((content, index) => ({
+    splitSentences(chunk.content).map((content, index) => ({
       id: `${chunk.id}-sentence-${index + 1}`,
       chunkId: chunk.id,
       sourceId: chunk.sourceId,

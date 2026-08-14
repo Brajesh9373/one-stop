@@ -4,6 +4,10 @@ export type StudentMode = 'chat' | 'call' | 'virtual-classroom'
 
 export type RetrievalScope = 'lecture' | 'course'
 
+export type ContentVisibility = 'students' | 'faculty' | 'private'
+
+export type EmbeddingProvider = 'local' | 'openai-compatible'
+
 export type CallSpeaker = 'student' | 'assistant'
 
 export type FacultySourceDocument = {
@@ -21,6 +25,13 @@ export type FacultySourceDocument = {
   section: string
   page?: number
   timestamp?: string
+  mimeType?: string
+  sourceUrl?: string
+  externalId?: string
+  connectorType?: string
+  visibility?: ContentVisibility
+  version?: string
+  contentHash?: string
   content: string
   updatedAt: string
 }
@@ -78,6 +89,8 @@ export type LectureContext = {
   lectureId: string
   lectureTitle: string
   lectureSequence: number
+  scope?: 'lecture' | 'subject'
+  allowCourseFallback?: boolean
 }
 
 export type RagCitation = {
@@ -106,6 +119,10 @@ export type RagDiagnostics = {
   courseCandidates: number
   lectureTopScore: number | null
   courseTopScore: number | null
+  embeddingProvider: EmbeddingProvider
+  generationProvider: 'extractive' | 'openai-compatible'
+  confidence: 'high' | 'medium' | 'low' | 'insufficient'
+  warnings: string[]
 }
 
 export type RagResult = {

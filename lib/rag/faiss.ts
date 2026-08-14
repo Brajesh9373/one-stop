@@ -1,44 +1,50 @@
 import { execFile } from 'node:child_process'
+import path from 'node:path'
 import { promisify } from 'node:util'
 
-import { getEmbeddingDimension } from '@/lib/rag/embedding'
+import { getEmbeddingDimension, getEmbeddingFingerprint } from '@/lib/rag/embedding'
 import { getRagStoragePaths } from '@/lib/rag/storage'
+import type { RetrievalScope } from '@/lib/rag/types'
 
 const execFileAsync = promisify(execFile)
-const pythonBinary = '/home/brajesh_kurkure/Projects/one-stop/.venv-rag/bin/python'
-const scriptPath = '/home/brajesh_kurkure/Projects/one-stop/scripts/rag_faiss.py'
+const pythonBinary = process.env.RAG_PYTHON_BINARY ?? path.join(process.cwd(), '.venv-rag', 'bin', 'python')
+const scriptPath = path.join(process.cwd(), 'scripts', 'rag_faiss.py')
 
-export type FaissSearchHit = {
-  chunkId: string
-  score: number
+export type FaissSearchHit = { chunkId: string; score: number }
+
+export type FaissSearchScope = {
+  institutionId: string
+  courseId: string
+  lectureId: string
+  scope: RetrievalScope
 }
 
 async function runFaissCommand(command: string, payload?: Record<string, unknown>) {
   const storage = getRagStoragePaths()
-  const { stdout } = await execFileAsync(pythonBinary, [
-    scriptPath,
-    command,
-    JSON.stringify({
+  const { stdout } = await execFileAsync(
+    pythonBinary,
+    [scriptPath, command, JSON.stringify({
       ...payload,
       sqlitePath: storage.sqliteFilePath,
       indexPath: storage.faissIndexPath,
       metaPath: storage.faissMetaPath,
       dimension: getEmbeddingDimension(),
-    }),
-  ])
-
+      fingerprint: getEmbeddingFingerprint(),
+    })],
+    { timeout: 60000, maxBuffer: 4 * 1024 * 1024 }
+  )
   return JSON.parse(stdout) as Record<string, unknown>
 }
 
 export async function rebuildFaissIndex() {
-  await runFaissCommand('rebuild')
+  return runFaissCommand('rebuild')
 }
 
-export async function searchFaissIndex(query: string, topK: number) {
-  const result = await runFaissCommand('search', {
-    query,
-    topK,
-  })
-
+export async function searchFaissIndex(
+  queryVector: number[],
+  topK: number,
+  filter: FaissSearchScope
+) {
+  const result = await runFaissCommand('search', { queryVector, topK, filter })
   return (result.matches as FaissSearchHit[] | undefined) ?? []
 }

@@ -1,449 +1,170 @@
 import { randomUUID } from 'node:crypto'
 
+import { detectSarvamLanguageConfig } from '@/lib/call/language'
+import { translateTextBetweenSarvam } from '@/lib/call/sarvam'
 import { hybridLectureRagConfig } from '@/lib/rag/config'
+import { getEmbeddingProvider } from '@/lib/rag/embedding'
 import { getRagRepository } from '@/lib/rag/repository'
-import type {
-  RagQuery,
-  RagResult,
-  RagRetrieveResult,
-  RetrievedChunk,
-  RetrievalScope,
-  SentenceUnit,
-} from '@/lib/rag/types'
+import { normalizeText, tokenize } from '@/lib/rag/text'
+import type { RagQuery, RagResult, RagRetrieveResult, RetrievedChunk, RetrievalScope, SentenceUnit } from '@/lib/rag/types'
 
-const STOP_WORDS = new Set([
-  'a',
-  'an',
-  'and',
-  'are',
-  'as',
-  'at',
-  'be',
-  'before',
-  'between',
-  'by',
-  'does',
-  'for',
-  'from',
-  'how',
-  'i',
-  'in',
-  'is',
-  'it',
-  'of',
-  'on',
-  'or',
-  'that',
-  'the',
-  'this',
-  'to',
-  'what',
-  'when',
-  'which',
-  'why',
-  'with',
-  'you',
-])
+type QueryProfile = { raw: string; retrievalText: string; tokens: string[] }
+type ScoredUnit = { unit: SentenceUnit; score: number; scope: RetrievalScope; lexicalScore: number }
 
-type QueryIntent = 'difference' | 'why' | 'how' | 'what' | 'generic'
+function clamp(value: number) { return Math.max(0, Math.min(1, value)) }
 
-type QueryProfile = {
-  raw: string
-  tokens: string[]
-  tokenSet: Set<string>
-  intent: QueryIntent
+async function buildQueryProfile(prompt: string): Promise<QueryProfile> {
+  const language = detectSarvamLanguageConfig(prompt)?.languageCode ?? 'en-IN'
+  let retrievalText = prompt
+  if (language !== 'en-IN' && process.env.SARVAM_API_KEY) {
+    try {
+      retrievalText = `${prompt}\n${await translateTextBetweenSarvam(prompt, language, 'en-IN')}`
+    } catch {
+      retrievalText = prompt
+    }
+  }
+  return { raw: prompt, retrievalText, tokens: Array.from(new Set(tokenize(retrievalText))) }
 }
 
-type ScoredUnit = {
-  unit: SentenceUnit
-  score: number
-  scope: RetrievalScope
-  lexicalScore: number
-  metadataScore: number
-  genericPenalty: number
+function lexicalCoverage(queryTokens: string[], unit: SentenceUnit) {
+  if (queryTokens.length === 0) return 0
+  const evidence = new Set(tokenize([unit.content, unit.section, unit.topic, unit.lectureTitle].join(' ')))
+  return queryTokens.filter((token) => evidence.has(token)).length / queryTokens.length
 }
 
-function tokenize(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter((token) => token && !STOP_WORDS.has(token))
-}
-
-function buildQueryProfile(prompt: string): QueryProfile {
-  const lower = prompt.toLowerCase()
-  const intent: QueryIntent = lower.includes('difference') || lower.includes('compare')
-    ? 'difference'
-    : lower.includes('why')
-      ? 'why'
-      : lower.includes('how')
-        ? 'how'
-        : lower.includes('what')
-          ? 'what'
-          : 'generic'
-
-  const tokens = tokenize(prompt)
-  return {
-    raw: prompt,
-    tokens,
-    tokenSet: new Set(tokens),
-    intent,
-  }
-}
-
-function normalizeRetrievedChunk(entry: ScoredUnit): RetrievedChunk {
-  return {
-    chunkId: entry.unit.id,
-    score: Number(entry.score.toFixed(3)),
-    scope: entry.scope,
-    sourceName: entry.unit.sourceName,
-    section: entry.unit.section,
-  }
-}
-
-function normalizeScoreMap(rawScores: Map<string, number>) {
-  if (rawScores.size === 0) return new Map<string, number>()
-  const maxScore = Math.max(...rawScores.values(), 0.000001)
-  const normalized = new Map<string, number>()
-  for (const [id, score] of rawScores.entries()) {
-    normalized.set(id, score / maxScore)
-  }
-  return normalized
-}
-
-function lexicalCoverage(tokens: string[], unit: SentenceUnit) {
-  if (tokens.length === 0) return 0
-  const haystack = [
-    unit.content,
-    unit.section,
-    unit.topic,
-    unit.sourceName,
-    unit.lectureTitle,
-  ]
-    .join(' ')
-    .toLowerCase()
-
-  let matches = 0
-  for (const token of tokens) {
-    if (haystack.includes(token)) matches += 1
-  }
-
-  return matches / tokens.length
-}
-
-function metadataAlignment(profile: QueryProfile, unit: SentenceUnit) {
-  const label = [unit.section, unit.topic, unit.sourceName, unit.lectureTitle].join(' ').toLowerCase()
-  let score = 0
-
-  for (const token of profile.tokens) {
-    if (label.includes(token)) score += 0.2
-  }
-
-  if (profile.intent === 'difference' && (label.includes('balanced') || label.includes('complete'))) score += 0.25
-  if (profile.intent === 'why' && (label.includes('why') || label.includes('performance'))) score += 0.2
-  if (profile.intent === 'how' && (label.includes('traversal') || label.includes('inorder') || label.includes('queue'))) score += 0.2
-  if (profile.intent === 'what' && (label.includes('bfs') || label.includes('breadth'))) score += 0.2
-
-  return Math.min(score, 1)
-}
-
-function unitLabel(unit: SentenceUnit) {
-  return [unit.content, unit.section, unit.topic, unit.sourceName, unit.lectureTitle].join(' ').toLowerCase()
-}
-
-function genericPenalty(profile: QueryProfile, unit: SentenceUnit) {
-  const label = [unit.section, unit.topic, unit.sourceName].join(' ').toLowerCase()
-  const isGeneric =
-    label.includes('review') ||
-    label.includes('practice') ||
-    label.includes('exam') ||
-    label.includes('office hours')
-
-  if (!isGeneric) return 0
-
-  if (profile.intent === 'difference' || profile.intent === 'how' || profile.intent === 'what') {
-    return hybridLectureRagConfig.genericSectionPenalty
-  }
-
-  if (profile.intent === 'why' && !label.includes('why')) {
-    return hybridLectureRagConfig.genericSectionPenalty * 0.75
-  }
-
-  return hybridLectureRagConfig.genericSectionPenalty * 0.35
-}
-
-function strongIntentMatch(profile: QueryProfile, unit: SentenceUnit) {
-  const label = unitLabel(unit)
-
-  if (profile.intent === 'difference') {
-    return label.includes('complete') && label.includes('balanced')
-  }
-  if (profile.intent === 'why') {
-    return (
-      label.includes('runtime') ||
-      label.includes('search') ||
-      label.includes('efficient') ||
-      label.includes('skewed')
-    )
-  }
-  if (profile.intent === 'how' && profile.tokenSet.has('inorder')) {
-    return label.includes('inorder') || label.includes('sorted order') || label.includes('visits')
-  }
-  if (profile.intent === 'what' && profile.tokenSet.has('bfs')) {
-    return label.includes('bfs') || label.includes('shortest path') || label.includes('queue')
-  }
-
-  return false
-}
-
-function normalizedSentence(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+function metadataCoverage(queryTokens: string[], unit: SentenceUnit) {
+  if (queryTokens.length === 0) return 0
+  const metadata = new Set(tokenize([unit.section, unit.topic, unit.sourceName, unit.lectureTitle].join(' ')))
+  return queryTokens.filter((token) => metadata.has(token)).length / queryTokens.length
 }
 
 function tokenOverlap(left: string, right: string) {
-  const leftTokens = new Set(tokenize(left))
-  const rightTokens = new Set(tokenize(right))
-  if (leftTokens.size === 0 || rightTokens.size === 0) return 0
-
+  const leftTokens = new Set(tokenize(left)); const rightTokens = new Set(tokenize(right))
+  if (!leftTokens.size || !rightTokens.size) return 0
   let shared = 0
-  for (const token of leftTokens) {
-    if (rightTokens.has(token)) shared += 1
-  }
-
+  for (const token of leftTokens) if (rightTokens.has(token)) shared += 1
   return shared / Math.min(leftTokens.size, rightTokens.size)
 }
 
-function hasDuplicateEvidence(candidate: ScoredUnit, selected: ScoredUnit[]) {
-  const candidateText = normalizedSentence(candidate.unit.content)
-  return selected.some((entry) => {
-    const selectedText = normalizedSentence(entry.unit.content)
-    return (
-      selectedText.includes(candidateText) ||
-      candidateText.includes(selectedText) ||
-      tokenOverlap(candidate.unit.content, entry.unit.content) >= 0.72
-    )
-  })
+function normalizeRetrievedChunk(entry: ScoredUnit): RetrievedChunk {
+  return { chunkId: entry.unit.id, score: Number(entry.score.toFixed(4)), scope: entry.scope, sourceName: entry.unit.sourceName, section: entry.unit.section }
 }
 
-function hardRelevanceFilter(profile: QueryProfile, unit: SentenceUnit, lexicalScore: number, metadataScore: number) {
-  if (strongIntentMatch(profile, unit)) return true
-
-  if (profile.intent === 'how' && profile.tokenSet.has('inorder')) {
-    return unitLabel(unit).includes('inorder') || lexicalScore >= 0.28
+async function scoreScope(profile: QueryProfile, query: RagQuery, scope: RetrievalScope) {
+  const repository = getRagRepository()
+  const boundary = {
+    institutionId: query.context.institutionId,
+    courseId: query.context.courseId,
+    lectureId: query.context.lectureId,
+    scope,
   }
-  if (profile.intent === 'difference' && (profile.tokenSet.has('balanced') || profile.tokenSet.has('complete'))) {
-    return unitLabel(unit).includes('balanced') || unitLabel(unit).includes('complete') || lexicalScore >= 0.28
-  }
-  if (profile.intent === 'what' && profile.tokenSet.has('bfs')) {
-    return unitLabel(unit).includes('bfs') || unitLabel(unit).includes('breadth') || lexicalScore >= 0.22
-  }
+  const candidateLimit = (scope === 'lecture' ? hybridLectureRagConfig.lectureTopK : hybridLectureRagConfig.courseTopK) * 5
+  const [sparseHits, denseHits] = await Promise.all([
+    repository.searchSparse(profile.retrievalText, boundary, candidateLimit),
+    repository.searchDense(profile.retrievalText, boundary, candidateLimit),
+  ])
+  const sparse = new Map(sparseHits.map((hit, index) => [hit.unitId, 1 / (60 + index + 1)]))
+  const dense = new Map(denseHits.map((hit, index) => [hit.chunkId, { similarity: clamp((hit.score + 1) / 2), rank: 1 / (60 + index + 1) }]))
+  const ids = Array.from(new Set([...sparse.keys(), ...dense.keys()]))
+  const units = await repository.getSentenceUnitsByIds(ids)
+  const maxRrf = 1 / 61
 
-  return (
-    lexicalScore >= hybridLectureRagConfig.chunkLexicalFloor ||
-    metadataScore >= hybridLectureRagConfig.chunkMetadataFloor
-  )
-}
-
-function scoreUnit(
-  profile: QueryProfile,
-  unit: SentenceUnit,
-  scope: RetrievalScope,
-  dense: number,
-  sparse: number
-): ScoredUnit {
-  const lexicalScore = lexicalCoverage(profile.tokens, unit)
-  const metadataScore = metadataAlignment(profile, unit)
-  const penalty = genericPenalty(profile, unit)
-  const scopeBoost =
-    scope === 'lecture'
-      ? hybridLectureRagConfig.lectureScopeBoost
-      : hybridLectureRagConfig.courseScopeBoost
-  const sourceTypeBoost = hybridLectureRagConfig.sourceTypeBoosts[unit.sourceType]
-
-  const score =
-    (
-      dense * hybridLectureRagConfig.denseWeight +
-      sparse * hybridLectureRagConfig.sparseWeight +
+  return units.map<ScoredUnit>((unit) => {
+    const lexicalScore = lexicalCoverage(profile.tokens, unit)
+    const metadataScore = metadataCoverage(profile.tokens, unit)
+    const denseHit = dense.get(unit.id)
+    const denseScore = denseHit ? (denseHit.similarity * 0.7 + denseHit.rank / maxRrf * 0.3) : 0
+    const sparseScore = (sparse.get(unit.id) ?? 0) / maxRrf
+    const scopeBoost = scope === 'lecture' ? hybridLectureRagConfig.lectureScopeBoost : hybridLectureRagConfig.courseScopeBoost
+    const score = (
+      denseScore * hybridLectureRagConfig.denseWeight +
+      sparseScore * hybridLectureRagConfig.sparseWeight +
       lexicalScore * hybridLectureRagConfig.lexicalWeight +
       metadataScore * hybridLectureRagConfig.metadataWeight
-    ) *
-    scopeBoost *
-    sourceTypeBoost -
-    penalty
-
-  return {
-    unit,
-    score,
-    scope,
-    lexicalScore,
-    metadataScore,
-    genericPenalty: penalty,
-  }
+    ) * scopeBoost * hybridLectureRagConfig.sourceTypeBoosts[unit.sourceType]
+    return { unit, score, scope, lexicalScore }
+  }).filter((entry) =>
+    entry.score >= hybridLectureRagConfig.minScoreThreshold &&
+    (entry.lexicalScore > 0 || dense.has(entry.unit.id) || sparse.has(entry.unit.id))
+  ).sort((left, right) => right.score - left.score)
 }
 
-async function scoreScope(
-  profile: QueryProfile,
-  courseId: string,
-  lectureId: string,
-  scope: RetrievalScope
-) {
-  const repository = getRagRepository()
-  const [sparseHits, denseHits] = await Promise.all([
-    repository.searchSparse(
-      profile.raw,
-      courseId,
-      lectureId,
-      scope,
-      hybridLectureRagConfig.lectureTopK * 4
-    ),
-    repository.searchDense(profile.raw, hybridLectureRagConfig.lectureTopK * 10),
-  ])
-
-  const denseScores = normalizeScoreMap(new Map(denseHits.map((hit) => [hit.chunkId, hit.score])))
-  const sparseScores = normalizeScoreMap(new Map(sparseHits.map((hit) => [hit.unitId, hit.score])))
-  const candidateIds = Array.from(new Set([...denseScores.keys(), ...sparseScores.keys()]))
-  const units = await repository.getSentenceUnitsByIds(candidateIds)
-
-  const scopedUnits = units.filter((unit) =>
-    scope === 'lecture'
-      ? unit.courseId === courseId && unit.lectureId === lectureId
-      : unit.courseId === courseId && unit.lectureId !== lectureId
-  )
-
-  const scored = scopedUnits
-    .map((unit) =>
-      scoreUnit(
-        profile,
-        unit,
-        scope,
-        denseScores.get(unit.id) ?? 0,
-        sparseScores.get(unit.id) ?? 0
-      )
-    )
-    .filter(
-      (entry) =>
-        entry.score >= hybridLectureRagConfig.minScoreThreshold &&
-        hardRelevanceFilter(profile, entry.unit, entry.lexicalScore, entry.metadataScore)
-    )
-    .sort((left, right) => right.score - left.score)
-
-  return { scored }
-}
-
-function diversifyUnits(scored: ScoredUnit[]) {
+function diversify(scored: ScoredUnit[]) {
   const selected: ScoredUnit[] = []
-  const seenSourceIds = new Map<string, number>()
-
-  for (const entry of scored) {
-    const prior = seenSourceIds.get(entry.unit.sourceId) ?? 0
-    const adjusted = entry.score - prior * hybridLectureRagConfig.repeatedSourcePenalty
+  const sourceCounts = new Map<string, number>()
+  for (const candidate of scored) {
+    if (selected.some((entry) => tokenOverlap(entry.unit.content, candidate.unit.content) >= hybridLectureRagConfig.duplicateEvidenceThreshold)) continue
+    const repeats = sourceCounts.get(candidate.unit.sourceId) ?? 0
+    const adjusted = candidate.score - repeats * hybridLectureRagConfig.repeatedSourcePenalty
     if (adjusted < hybridLectureRagConfig.minScoreThreshold) continue
-
-    selected.push({ ...entry, score: adjusted })
-    seenSourceIds.set(entry.unit.sourceId, prior + 1)
-
+    selected.push({ ...candidate, score: adjusted })
+    sourceCounts.set(candidate.unit.sourceId, repeats + 1)
     if (selected.length >= hybridLectureRagConfig.finalTopK) break
   }
-
   return selected
 }
 
-function synthesizeAnswer(profile: QueryProfile, units: ScoredUnit[], fallbackUsed: boolean) {
-  if (units.length === 0) {
-    return {
-      answer:
-        "I couldn't find grounded material for that question in the selected lecture context. Try asking about a concept that appears in this lecture or connect more lecture resources first.",
-      citedIds: [] as string[],
-    }
+function answerFromEvidence(units: ScoredUnit[], fallbackUsed: boolean) {
+  if (!units.length) return {
+    answer: "I couldn't find enough evidence in the selected academic context to answer safely. Add or sync relevant notes, or ask a question covered by this lecture.",
+    cited: [] as ScoredUnit[],
   }
+  const cited = units.slice(0, hybridLectureRagConfig.maxAnswerSentences)
+  const prefix = fallbackUsed ? 'The selected lecture did not contain enough evidence, so I used related material from this subject. ' : ''
+  return { answer: `${prefix}${cited.map((entry) => normalizeText(entry.unit.content)).join(' ')}`, cited }
+}
 
-  const ordered: ScoredUnit[] = []
-  for (const entry of units.filter((unit) => strongIntentMatch(profile, unit.unit) || unit.lexicalScore >= 0.2)) {
-    if (hasDuplicateEvidence(entry, ordered)) continue
-    ordered.push(entry)
-    if (ordered.length >= hybridLectureRagConfig.maxAnswerSentences) break
-  }
+function confidenceFor(units: ScoredUnit[]) {
+  const score = units[0]?.score ?? 0
+  if (!units.length) return 'insufficient' as const
+  if (score >= 0.7 && units.length >= 2) return 'high' as const
+  if (score >= 0.45) return 'medium' as const
+  return 'low' as const
+}
 
-  if (ordered.length === 0) {
-    return {
-      answer:
-        'I found lecture-grounded material, but none of the strongest evidence matched the question closely enough to answer safely.',
-      citedIds: [] as string[],
-    }
-  }
-
-  const prefix = fallbackUsed
-    ? 'I expanded beyond the selected lecture into broader course material because the lecture itself did not provide a strong enough match. '
-    : ''
-
-  return {
-    answer: `${prefix}${ordered.map((entry) => entry.unit.content).join(' ')}`,
-    citedIds: ordered.map((entry) => entry.unit.id),
-  }
+async function localizeAnswer(answer: string, prompt: string) {
+  const target = detectSarvamLanguageConfig(prompt)?.languageCode ?? 'en-IN'
+  if (target === 'en-IN' || !process.env.SARVAM_API_KEY) return answer
+  try { return await translateTextBetweenSarvam(answer, 'en-IN', target) } catch { return answer }
 }
 
 export async function inspectHybridLectureRetrieval(query: RagQuery): Promise<RagRetrieveResult> {
-  const requestId = randomUUID()
-  const profile = buildQueryProfile(query.prompt)
-  const [lectureScope, courseScope] = await Promise.all([
-    scoreScope(profile, query.context.courseId, query.context.lectureId, 'lecture'),
-    scoreScope(profile, query.context.courseId, query.context.lectureId, 'course'),
-  ])
-
+  const profile = await buildQueryProfile(query.prompt)
+  const lectureResults = await scoreScope(profile, query, 'lecture')
+  const canUseCourse = query.context.scope === 'subject' || query.context.allowCourseFallback === true
+  const courseResults = canUseCourse ? await scoreScope(profile, query, 'course') : []
   return {
-    requestId,
-    lectureResults: lectureScope.scored
-      .slice(0, hybridLectureRagConfig.lectureTopK)
-      .map(normalizeRetrievedChunk),
-    courseResults: courseScope.scored
-      .slice(0, hybridLectureRagConfig.courseTopK)
-      .map(normalizeRetrievedChunk),
+    requestId: randomUUID(),
+    lectureResults: lectureResults.slice(0, hybridLectureRagConfig.lectureTopK).map(normalizeRetrievedChunk),
+    courseResults: courseResults.slice(0, hybridLectureRagConfig.courseTopK).map(normalizeRetrievedChunk),
   }
 }
 
 export async function runHybridLectureRag(query: RagQuery): Promise<RagResult> {
-  const startedAt = performance.now()
-  const requestId = randomUUID()
-  const profile = buildQueryProfile(query.prompt)
-  const [lectureScope, courseScope] = await Promise.all([
-    scoreScope(profile, query.context.courseId, query.context.lectureId, 'lecture'),
-    scoreScope(profile, query.context.courseId, query.context.lectureId, 'course'),
-  ])
-
-  const fallbackUsed = lectureScope.scored.length === 0
-  const selected = diversifyUnits(fallbackUsed ? courseScope.scored : lectureScope.scored)
-  const synthesized = synthesizeAnswer(profile, selected, fallbackUsed)
-  const cited = selected.filter((entry) => synthesized.citedIds.includes(entry.unit.id))
-  const durationMs = Math.round(performance.now() - startedAt)
-
+  const startedAt = performance.now(); const requestId = randomUUID(); const warnings: string[] = []
+  const profile = await buildQueryProfile(query.prompt)
+  const isSubjectScope = query.context.scope === 'subject' || query.context.lectureSequence === 0
+  const lecture = isSubjectScope ? [] : await scoreScope(profile, query, 'lecture')
+  const canFallback = isSubjectScope || query.context.allowCourseFallback === true
+  const fallbackUsed = isSubjectScope || (lecture.length === 0 && canFallback)
+  const course = fallbackUsed ? await scoreScope(profile, query, 'course') : []
+  const selected = diversify(fallbackUsed ? course : lecture)
+  const generated = answerFromEvidence(selected, fallbackUsed && !isSubjectScope)
+  const answer = await localizeAnswer(generated.answer, query.prompt)
+  if (getEmbeddingProvider() === 'local') warnings.push('Local fallback embeddings are active; configure an embedding provider for semantic multilingual retrieval.')
+  if (!process.env.RAG_GENERATION_API_KEY) warnings.push('Extractive grounded generation is active.')
   return {
-    answer: synthesized.answer,
-    citations: cited.map(({ unit }) => ({
-      chunkId: unit.id,
-      sourceType: unit.sourceType,
-      sourceName: unit.sourceName,
-      section: unit.section,
-      lectureId: unit.lectureId,
-      lectureTitle: unit.lectureTitle,
-      page: unit.page,
-      timestamp: unit.timestamp,
+    answer,
+    citations: generated.cited.map(({ unit }) => ({
+      chunkId: unit.chunkId, sourceType: unit.sourceType, sourceName: unit.sourceName, section: unit.section,
+      lectureId: unit.lectureId, lectureTitle: unit.lectureTitle, page: unit.page, timestamp: unit.timestamp,
     })),
-    retrievedChunks: cited.map(normalizeRetrievedChunk),
-    fallbackUsed,
+    retrievedChunks: generated.cited.map(normalizeRetrievedChunk), fallbackUsed,
     diagnostics: {
-      requestId,
-      durationMs,
-      lectureCandidates: lectureScope.scored.length,
-      courseCandidates: courseScope.scored.length,
-      lectureTopScore:
-        lectureScope.scored.length > 0 ? Number(lectureScope.scored[0].score.toFixed(3)) : null,
-      courseTopScore:
-        courseScope.scored.length > 0 ? Number(courseScope.scored[0].score.toFixed(3)) : null,
+      requestId, durationMs: Math.round(performance.now() - startedAt), lectureCandidates: lecture.length,
+      courseCandidates: course.length, lectureTopScore: lecture[0] ? Number(lecture[0].score.toFixed(4)) : null,
+      courseTopScore: course[0] ? Number(course[0].score.toFixed(4)) : null,
+      embeddingProvider: getEmbeddingProvider(), generationProvider: 'extractive', confidence: confidenceFor(selected), warnings,
     },
   }
 }

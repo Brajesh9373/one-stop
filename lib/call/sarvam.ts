@@ -152,13 +152,21 @@ export async function transcribeSpeechWithSarvam(input: TranscribeInput) {
 }
 
 export async function translateTextWithSarvam(text: string, targetLanguageCode: string) {
-  if (!text.trim() || targetLanguageCode === 'en-IN') return text
+  return translateTextBetweenSarvam(text, 'en-IN', targetLanguageCode)
+}
+
+export async function translateTextBetweenSarvam(
+  text: string,
+  sourceLanguageCode: string,
+  targetLanguageCode: string
+) {
+  if (!text.trim() || sourceLanguageCode === targetLanguageCode) return text
   const config = getSarvamConfig()
 
   try {
     const response = await getClient().text.translate({
       input: text.slice(0, 1900),
-      source_language_code: asTranslateSource('en-IN'),
+      source_language_code: asTranslateSource(sourceLanguageCode),
       target_language_code: asTranslateTarget(targetLanguageCode),
       model: asTranslateModel(config.translateModel),
       mode: 'formal',

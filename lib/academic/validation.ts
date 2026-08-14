@@ -236,5 +236,6 @@ export function parseFacultyAssistantInput(value: unknown): FacultyAssistantInpu
     subjectId: isNonEmptyString(payload.subjectId) ? payload.subjectId.trim() : undefined,
     connectorId: isNonEmptyString(payload.connectorId) ? payload.connectorId.trim() : undefined,
     command: payload.command.trim(),
+    confirmationToken: isNonEmptyString(payload.confirmationToken) ? payload.confirmationToken.trim() : undefined,
   }
 }

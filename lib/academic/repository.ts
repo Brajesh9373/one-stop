@@ -30,6 +30,8 @@ import type {
 } from '@/lib/academic/types'
 import { getRagRepository } from '@/lib/rag/repository'
 import { runHybridLectureRag } from '@/lib/rag/hybrid'
+import { syncConnectorDocuments } from '@/lib/connectors/service'
+import { createConfirmationToken, readConfirmationToken } from '@/lib/academic/assistant-guard'
 import type { FacultySourceDocument, LectureContext } from '@/lib/rag/types'
 
 const institutionId = 'onestop-demo'
@@ -187,20 +189,6 @@ function summarizeText(value: string, maxSentences = 3) {
     .filter(Boolean)
 
   return sentences.slice(0, maxSentences).join(' ') || value.slice(0, 220)
-}
-
-function connectorNoteFor(connector: ConnectorSource, lecture: Lecture) {
-  const sourceLabel = connector.provider === 'google-drive'
-    ? 'Google Drive'
-    : connector.provider === 'google-classroom'
-      ? 'Google Classroom'
-      : 'Manual upload'
-
-  return [
-    `Imported from ${sourceLabel}: ${lecture.title}.`,
-    connector.availableNotes,
-    `For ${lecture.topic}, emphasize definitions, worked examples, common mistakes, and the questions students are likely to ask during revision.`,
-  ].join(' ')
 }
 
 async function syncLectureToRag(db: DatabaseSync, lectureId: string) {
@@ -818,9 +806,29 @@ class AcademicRepository {
 
       const lecture = this.listLectures().find((entry) => entry.id === input.lectureId)
       if (!lecture) throw new Error('Lecture not found.')
+      const subject = this.listSubjects().find((entry) => entry.id === lecture.subjectId && entry.teacherId === input.teacherId)
+      if (!subject) throw new Error('The lecture is not assigned to this teacher.')
+      if (connector.provider !== 'google-drive' && connector.provider !== 'google-classroom') {
+        throw new Error('Manual uploads must use the document upload endpoint.')
+      }
 
-      const importedNote = connectorNoteFor(connector, lecture)
-      const nextNotes = [lecture.notes, importedNote].filter((part) => part.trim()).join('\n\n')
+      const sync = await syncConnectorDocuments({
+        connector: connector.provider,
+        institutionId,
+        facultyId: input.teacherId,
+        courseId: subject.id,
+        courseName: subject.name,
+        lectureId: lecture.id,
+        lectureTitle: lecture.title,
+        lectureSequence: lecture.sequence,
+        topic: lecture.topic,
+      })
+      if (sync.documents.length === 0) {
+        const reason = sync.failures[0]?.reason ?? 'No supported documents were found in the configured source.'
+        throw new Error(`Connector sync produced no indexable notes. ${reason}`)
+      }
+      const importedNotes = sync.documents.map((document) => `Source: ${document.sourceName}\n${document.content}`).join('\n\n')
+      const nextNotes = [lecture.notes, importedNotes].filter((part) => part.trim()).join('\n\n')
       this.db
         .prepare("UPDATE lectures SET notes = ?, status = 'ready', updated_at = ? WHERE id = ?")
         .run(nextNotes, now(), lecture.id)
@@ -828,7 +836,7 @@ class AcademicRepository {
         .prepare('UPDATE connector_sources SET status = ?, last_synced_at = ? WHERE id = ?')
         .run('connected', now(), connector.id)
 
-      await syncLectureToRag(this.db, lecture.id)
+      await getRagRepository().ingest(sync.documents)
       return this.listLectures().find((entry) => entry.id === lecture.id)!
     })
   }
@@ -870,29 +878,35 @@ class AcademicRepository {
       }
     }
 
+    const confirmed = input.confirmationToken ? readConfirmationToken(input.confirmationToken) : null
+    if (input.confirmationToken && (!confirmed || confirmed.teacherId !== input.teacherId || confirmed.subjectId !== subject.id)) {
+      return { action: 'blocked', answer: 'The confirmation expired or does not match this teacher and subject.', guardrails }
+    }
+
+    if (confirmed?.action === 'create-lecture') {
+      const topic = confirmed.topic ?? 'New lecture'
+      const lecture = await this.createLecture({
+        subjectId: subject.id, moduleId: subjectModules[0]?.id ?? `${subject.id}-module-01`,
+        title: topic, topic, notes: '', createdBy: input.teacherId,
+      })
+      return { action: 'created-lecture', answer: `Created "${lecture.title}" in ${subject.code}. Add or sync source notes before starting it.`, guardrails, createdLectureId: lecture.id }
+    }
+
+    if (confirmed?.action === 'sync-notes') {
+      const connector = this.listConnectors().find((entry) => entry.id === confirmed.connectorId && entry.teacherId === input.teacherId)
+      const lecture = subjectLectures.find((entry) => entry.id === confirmed.lectureId)
+      if (!connector || !lecture) return { action: 'blocked', answer: 'The connector or lecture no longer exists.', guardrails }
+      const updatedLecture = await this.syncConnectorNotes({ connectorId: connector.id, lectureId: lecture.id, teacherId: input.teacherId })
+      return { action: 'synced-notes', answer: `Synced ${connector.name} into "${updatedLecture.title}" and rebuilt its lecture-scoped index.`, guardrails, updatedLectureId: updatedLecture.id }
+    }
+
     if (command.includes('create') && command.includes('lecture')) {
       const topicMatch = input.command.match(/(?:on|about|for)\s+(.+)$/i)
       const topic = topicMatch?.[1]?.trim() || 'Connector-assisted lecture'
-      const connector = input.connectorId
-        ? this.listConnectors().find((entry) => entry.id === input.connectorId && entry.teacherId === input.teacherId)
-        : this.listConnectors().find((entry) => entry.teacherId === input.teacherId && entry.status === 'connected')
-      const notes = connector
-        ? `${connector.availableNotes} Faculty assistant draft for ${topic}. Include a definition, two examples, student misconception checks, and a short recap.`
-        : `Faculty assistant draft for ${topic}. Add connector notes before starting this lecture.`
-      const lecture = await this.createLecture({
-        subjectId: subject.id,
-        moduleId: subjectModules[0]?.id ?? `${subject.id}-module-01`,
-        title: topic,
-        topic,
-        notes,
-        createdBy: input.teacherId,
-      })
-
       return {
-        action: 'created-lecture',
-        answer: `Created "${lecture.title}" in ${subject.code} and indexed its draft notes for RAG.`,
-        guardrails,
-        createdLectureId: lecture.id,
+        action: 'confirmation-required', answer: `I am ready to create a lecture titled "${topic}" in ${subject.code}. Say confirm to proceed.`,
+        guardrails, proposedAction: `Create lecture: ${topic}`,
+        confirmationToken: createConfirmationToken({ teacherId: input.teacherId, subjectId: subject.id, action: 'create-lecture', topic }),
       }
     }
 
@@ -909,16 +923,10 @@ class AcademicRepository {
         }
       }
 
-      const updatedLecture = await this.syncConnectorNotes({
-        connectorId: connector.id,
-        lectureId: lecture.id,
-        teacherId: input.teacherId,
-      })
       return {
-        action: 'synced-notes',
-        answer: `Synced ${connector.name} notes into "${updatedLecture.title}" and refreshed its RAG index.`,
-        guardrails,
-        updatedLectureId: updatedLecture.id,
+        action: 'confirmation-required', answer: `I am ready to fetch ${connector.name} into "${lecture.title}". Say confirm to start the external sync and indexing.`,
+        guardrails, proposedAction: `Sync ${connector.name} into ${lecture.title}`,
+        confirmationToken: createConfirmationToken({ teacherId: input.teacherId, subjectId: subject.id, connectorId: connector.id, action: 'sync-notes', lectureId: lecture.id }),
       }
     }
 
